@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+
+# Large, regenerable benchmark data (re-download — see docs/PROGRESS.md "Data").
+eval/data/spreadsheet/
+
+# Per-run working dirs (transcripts/ledgers): bulky + reproducible.
+# We KEEP the results of record: tasks.jsonl, curve.csv, summary.json, *.svg.
+eval/out/*/runs/*/home/
+
+# Promoted skills are a real ./skills dir; .claude/skills is a generated symlink.
+.claude/skills
+
+# Per-deployment evolving state (uncomment to keep memory local-only)
+# memory/store.jsonl
+# memory/skill_state.json
+# memory/skill_candidates/

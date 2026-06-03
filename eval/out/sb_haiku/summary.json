@@ -1,0 +1,34 @@
+{
+  "no_memory": {
+    "final_preq_em": 0.375,
+    "final_preq_f1": 0.375,
+    "first_half_em": 0.3125,
+    "second_half_em": 0.4375,
+    "total_cost_usd": 0.5906,
+    "final_bullets": 0.0
+  },
+  "external_optimizer": {
+    "final_preq_em": 0.375,
+    "final_preq_f1": 0.375,
+    "first_half_em": 0.375,
+    "second_half_em": 0.375,
+    "total_cost_usd": 0.9356,
+    "final_bullets": 0.0
+  },
+  "ace": {
+    "final_preq_em": 0.375,
+    "final_preq_f1": 0.375,
+    "first_half_em": 0.3125,
+    "second_half_em": 0.4375,
+    "total_cost_usd": 0.981,
+    "final_bullets": 39.5
+  },
+  "ours_full": {
+    "final_preq_em": 0.5,
+    "final_preq_f1": 0.5,
+    "first_half_em": 0.4375,
+    "second_half_em": 0.5625,
+    "total_cost_usd": 1.0473,
+    "final_bullets": 40.5
+  }
+}

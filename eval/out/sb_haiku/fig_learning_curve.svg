@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="460" font-family="Helvetica,Arial,sans-serif">
+<rect width="720" height="460" fill="white"/>
+<text x="70.0" y="26.0" font-size="16" fill="#222" text-anchor="start" font-weight="bold">Prequential learning curve (SearchQA, 2 seeds)</text>
+<line x1="70.0" y1="404.0" x2="490.0" y2="404.0" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="408.0" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.0</text>
+<line x1="70.0" y1="332.4" x2="490.0" y2="332.4" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="336.4" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.2</text>
+<line x1="70.0" y1="260.8" x2="490.0" y2="260.8" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="264.8" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.4</text>
+<line x1="70.0" y1="189.2" x2="490.0" y2="189.2" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="193.2" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.6</text>
+<line x1="70.0" y1="117.6" x2="490.0" y2="117.6" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="121.6" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.8</text>
+<line x1="70.0" y1="46.0" x2="490.0" y2="46.0" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="50.0" font-size="11" fill="#666" text-anchor="end" font-weight="normal">1.0</text>
+<line x1="70.0" y1="46.0" x2="70.0" y2="404.0" stroke="#333" stroke-width="1"/>
+<line x1="70.0" y1="404.0" x2="490.0" y2="404.0" stroke="#333" stroke-width="1"/>
+<text x="280.0" y="444.0" font-size="12" fill="#222" text-anchor="middle" font-weight="normal">task index in stream</text>
+<text transform="rotate(-90 18 225.0)" x="18.0" y="225.0" font-size="12" fill="#222" text-anchor="middle" font-weight="normal">prequential EM</text>
+<text x="70.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">0</text>
+<text x="126.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">2</text>
+<text x="182.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">4</text>
+<text x="238.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">6</text>
+<text x="294.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">8</text>
+<text x="350.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">10</text>
+<text x="406.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">12</text>
+<text x="462.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">14</text>
+<polygon points="70.0,46.0 98.0,225.0 126.0,165.3 154.0,225.0 182.0,260.8 210.0,225.0 238.0,250.6 266.0,269.8 294.0,244.9 322.0,260.8 350.0,273.8 378.0,284.7 406.0,266.3 434.0,250.6 462.0,260.8 490.0,269.8 490.0,269.8 462.0,260.8 434.0,276.1 406.0,266.3 378.0,284.7 350.0,273.8 322.0,296.6 294.0,284.7 266.0,314.5 238.0,301.7 210.0,344.3 182.0,332.4 154.0,404.0 126.0,404.0 98.0,404.0 70.0,404.0" fill="#888888" fill-opacity="0.13" stroke="none"/>
+<polyline points="70.0,225.0 98.0,314.5 126.0,284.7 154.0,314.5 182.0,296.6 210.0,284.7 238.0,276.1 266.0,292.1 294.0,264.8 322.0,278.7 350.0,273.8 378.0,284.7 406.0,266.3 434.0,263.4 462.0,260.8 490.0,269.8" fill="none" stroke="#888888" stroke-width="2.4"/>
+<line x1="504.0" y1="52.0" x2="526.0" y2="52.0" stroke="#888888" stroke-width="3"/>
+<text x="532.0" y="56.0" font-size="11" fill="#222" text-anchor="start" font-weight="normal">no-memory (lower bound) (0.375)</text>
+<polygon points="70.0,46.0 98.0,46.0 126.0,165.3 154.0,225.0 182.0,260.8 210.0,225.0 238.0,250.6 266.0,269.8 294.0,244.9 322.0,225.0 350.0,241.3 378.0,254.8 406.0,238.8 434.0,250.6 462.0,260.8 490.0,269.8 490.0,269.8 462.0,260.8 434.0,276.1 406.0,266.3 378.0,254.8 350.0,241.3 322.0,260.8 294.0,244.9 266.0,269.8 238.0,250.6 210.0,284.7 182.0,332.4 154.0,404.0 126.0,404.0 98.0,404.0 70.0,404.0" fill="#9467bd" fill-opacity="0.13" stroke="none"/>
+<polyline points="70.0,225.0 98.0,225.0 126.0,284.7 154.0,314.5 182.0,296.6 210.0,254.8 238.0,250.6 266.0,269.8 294.0,244.9 322.0,242.9 350.0,241.3 378.0,254.8 406.0,252.5 434.0,263.4 462.0,260.8 490.0,269.8" fill="none" stroke="#9467bd" stroke-width="2.4"/>
+<line x1="504.0" y1="72.0" x2="526.0" y2="72.0" stroke="#9467bd" stroke-width="3"/>
+<text x="532.0" y="76.0" font-size="11" fill="#222" text-anchor="start" font-weight="normal">external optimizer (offline) (0.375)</text>
+<polygon points="70.0,404.0 98.0,225.0 126.0,284.7 154.0,314.5 182.0,260.8 210.0,284.7 238.0,250.6 266.0,269.8 294.0,284.7 322.0,296.6 350.0,273.8 378.0,284.7 406.0,266.3 434.0,250.6 462.0,236.9 490.0,247.4 490.0,292.1 462.0,284.7 434.0,301.7 406.0,293.8 378.0,314.5 350.0,306.4 322.0,296.6 294.0,284.7 266.0,314.5 238.0,301.7 210.0,284.7 182.0,332.4 154.0,314.5 126.0,404.0 98.0,404.0 70.0,404.0" fill="#ff7f0e" fill-opacity="0.13" stroke="none"/>
+<polyline points="70.0,404.0 98.0,314.5 126.0,344.3 154.0,314.5 182.0,296.6 210.0,284.7 238.0,276.1 266.0,292.1 294.0,284.7 322.0,296.6 350.0,290.1 378.0,299.6 406.0,280.1 434.0,276.1 462.0,260.8 490.0,269.8" fill="none" stroke="#ff7f0e" stroke-width="2.4"/>
+<line x1="504.0" y1="92.0" x2="526.0" y2="92.0" stroke="#ff7f0e" stroke-width="3"/>
+<text x="532.0" y="96.0" font-size="11" fill="#222" text-anchor="start" font-weight="normal">ACE (single-tier playbook) (0.375)</text>
+<polygon points="70.0,46.0 98.0,46.0 126.0,165.3 154.0,225.0 182.0,260.8 210.0,225.0 238.0,199.4 266.0,225.0 294.0,205.1 322.0,225.0 350.0,208.7 378.0,225.0 406.0,211.2 434.0,199.4 462.0,189.2 490.0,202.6 490.0,247.4 462.0,260.8 434.0,276.1 406.0,266.3 378.0,284.7 350.0,273.8 322.0,260.8 294.0,244.9 266.0,269.8 238.0,250.6 210.0,225.0 182.0,260.8 154.0,314.5 126.0,404.0 98.0,404.0 70.0,404.0" fill="#1f77b4" fill-opacity="0.13" stroke="none"/>
+<polyline points="70.0,225.0 98.0,225.0 126.0,284.7 154.0,269.8 182.0,260.8 210.0,225.0 238.0,225.0 266.0,247.4 294.0,225.0 322.0,242.9 350.0,241.3 378.0,254.8 406.0,238.8 434.0,237.8 462.0,225.0 490.0,225.0" fill="none" stroke="#1f77b4" stroke-width="2.4"/>
+<line x1="504.0" y1="112.0" x2="526.0" y2="112.0" stroke="#1f77b4" stroke-width="3"/>
+<text x="532.0" y="116.0" font-size="11" fill="#222" text-anchor="start" font-weight="normal">ours (two-tier + gate) (0.500)</text>
+</svg>

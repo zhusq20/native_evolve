@@ -1,0 +1,18 @@
+{
+  "ace": {
+    "final_preq_em": 0.8125,
+    "final_preq_f1": 0.8602,
+    "first_half_em": 0.7917,
+    "second_half_em": 0.8333,
+    "total_cost_usd": 0.6519,
+    "final_bullets": 5.5
+  },
+  "external_optimizer": {
+    "final_preq_em": 0.8958,
+    "final_preq_f1": 0.9208,
+    "first_half_em": 0.875,
+    "second_half_em": 0.9167,
+    "total_cost_usd": 0.5559,
+    "final_bullets": 0.0
+  }
+}

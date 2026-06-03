@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="460" font-family="Helvetica,Arial,sans-serif">
+<rect width="720" height="460" fill="white"/>
+<text x="70.0" y="26.0" font-size="16" fill="#222" text-anchor="start" font-weight="bold">Accuracy vs cumulative cost (SearchQA)</text>
+<line x1="70.0" y1="404.0" x2="490.0" y2="404.0" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="408.0" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.0</text>
+<line x1="70.0" y1="332.4" x2="490.0" y2="332.4" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="336.4" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.2</text>
+<line x1="70.0" y1="260.8" x2="490.0" y2="260.8" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="264.8" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.4</text>
+<line x1="70.0" y1="189.2" x2="490.0" y2="189.2" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="193.2" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.6</text>
+<line x1="70.0" y1="117.6" x2="490.0" y2="117.6" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="121.6" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.8</text>
+<line x1="70.0" y1="46.0" x2="490.0" y2="46.0" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="50.0" font-size="11" fill="#666" text-anchor="end" font-weight="normal">1.0</text>
+<line x1="70.0" y1="46.0" x2="70.0" y2="404.0" stroke="#333" stroke-width="1"/>
+<line x1="70.0" y1="404.0" x2="490.0" y2="404.0" stroke="#333" stroke-width="1"/>
+<text x="280.0" y="444.0" font-size="12" fill="#222" text-anchor="middle" font-weight="normal">cumulative cost (USD, incl. self-evolution / training)</text>
+<text transform="rotate(-90 18 225.0)" x="18.0" y="225.0" font-size="12" fill="#222" text-anchor="middle" font-weight="normal">prequential EM</text>
+<text x="70.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">$0.00</text>
+<text x="154.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">$0.21</text>
+<text x="238.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">$0.43</text>
+<text x="322.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">$0.64</text>
+<text x="406.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">$0.85</text>
+<text x="490.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">$1.07</text>
+<polygon points="81.2,46.0 89.7,225.0 115.7,165.3 128.5,225.0 137.9,260.8 153.1,225.0 170.1,250.6 179.1,269.8 192.8,244.9 208.6,260.8 213.8,273.8 232.4,284.7 255.7,266.3 268.3,250.6 281.6,260.8 302.2,269.8 302.2,269.8 281.6,260.8 268.3,276.1 255.7,266.3 232.4,284.7 213.8,273.8 208.6,296.6 192.8,284.7 179.1,314.5 170.1,301.7 153.1,344.3 137.9,332.4 128.5,404.0 115.7,404.0 89.7,404.0 81.2,404.0" fill="#888888" fill-opacity="0.13" stroke="none"/>
+<polyline points="81.2,225.0 89.7,314.5 115.7,284.7 128.5,314.5 137.9,296.6 153.1,284.7 170.1,276.1 179.1,292.1 192.8,264.8 208.6,278.7 213.8,273.8 232.4,284.7 255.7,266.3 268.3,263.4 281.6,260.8 302.2,269.8" fill="none" stroke="#888888" stroke-width="2.4"/>
+<line x1="504.0" y1="52.0" x2="526.0" y2="52.0" stroke="#888888" stroke-width="3"/>
+<text x="532.0" y="56.0" font-size="11" fill="#222" text-anchor="start" font-weight="normal">no-memory (lower bound) (0.375)</text>
+<polygon points="225.6,46.0 236.3,46.0 254.3,165.3 263.0,225.0 272.6,260.8 286.0,225.0 300.5,250.6 316.8,269.8 332.1,244.9 352.8,225.0 368.4,241.3 380.8,254.8 395.0,238.8 407.3,250.6 420.9,260.8 437.9,269.8 437.9,269.8 420.9,260.8 407.3,276.1 395.0,266.3 380.8,254.8 368.4,241.3 352.8,260.8 332.1,244.9 316.8,269.8 300.5,250.6 286.0,284.7 272.6,332.4 263.0,404.0 254.3,404.0 236.3,404.0 225.6,404.0" fill="#9467bd" fill-opacity="0.13" stroke="none"/>
+<polyline points="225.6,225.0 236.3,225.0 254.3,284.7 263.0,314.5 272.6,296.6 286.0,254.8 300.5,250.6 316.8,269.8 332.1,244.9 352.8,242.9 368.4,241.3 380.8,254.8 395.0,252.5 407.3,263.4 420.9,260.8 437.9,269.8" fill="none" stroke="#9467bd" stroke-width="2.4"/>
+<line x1="504.0" y1="72.0" x2="526.0" y2="72.0" stroke="#9467bd" stroke-width="3"/>
+<text x="532.0" y="76.0" font-size="11" fill="#222" text-anchor="start" font-weight="normal">external optimizer (offline) (0.375)</text>
+<polygon points="96.1,404.0 117.1,225.0 143.9,284.7 165.2,314.5 181.6,260.8 213.0,284.7 230.3,250.6 250.7,269.8 278.3,284.7 299.5,296.6 328.5,273.8 360.5,284.7 386.1,266.3 410.3,250.6 438.1,236.9 455.7,247.4 455.7,292.1 438.1,284.7 410.3,301.7 386.1,293.8 360.5,314.5 328.5,306.4 299.5,296.6 278.3,284.7 250.7,314.5 230.3,301.7 213.0,284.7 181.6,332.4 165.2,314.5 143.9,404.0 117.1,404.0 96.1,404.0" fill="#ff7f0e" fill-opacity="0.13" stroke="none"/>
+<polyline points="96.1,404.0 117.1,314.5 143.9,344.3 165.2,314.5 181.6,296.6 213.0,284.7 230.3,276.1 250.7,292.1 278.3,284.7 299.5,296.6 328.5,290.1 360.5,299.6 386.1,280.1 410.3,276.1 438.1,260.8 455.7,269.8" fill="none" stroke="#ff7f0e" stroke-width="2.4"/>
+<line x1="504.0" y1="92.0" x2="526.0" y2="92.0" stroke="#ff7f0e" stroke-width="3"/>
+<text x="532.0" y="96.0" font-size="11" fill="#222" text-anchor="start" font-weight="normal">ACE (single-tier playbook) (0.375)</text>
+<polygon points="89.4,46.0 115.5,46.0 142.5,165.3 161.8,225.0 183.9,260.8 209.3,225.0 233.4,199.4 257.8,225.0 284.2,205.1 309.6,225.0 340.3,208.7 376.9,225.0 403.8,211.2 427.6,199.4 449.4,189.2 481.8,202.6 481.8,247.4 449.4,260.8 427.6,276.1 403.8,266.3 376.9,284.7 340.3,273.8 309.6,260.8 284.2,244.9 257.8,269.8 233.4,250.6 209.3,225.0 183.9,260.8 161.8,314.5 142.5,404.0 115.5,404.0 89.4,404.0" fill="#1f77b4" fill-opacity="0.13" stroke="none"/>
+<polyline points="89.4,225.0 115.5,225.0 142.5,284.7 161.8,269.8 183.9,260.8 209.3,225.0 233.4,225.0 257.8,247.4 284.2,225.0 309.6,242.9 340.3,241.3 376.9,254.8 403.8,238.8 427.6,237.8 449.4,225.0 481.8,225.0" fill="none" stroke="#1f77b4" stroke-width="2.4"/>
+<line x1="504.0" y1="112.0" x2="526.0" y2="112.0" stroke="#1f77b4" stroke-width="3"/>
+<text x="532.0" y="116.0" font-size="11" fill="#222" text-anchor="start" font-weight="normal">ours (two-tier + gate) (0.500)</text>
+</svg>

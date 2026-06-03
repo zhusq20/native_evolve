@@ -1,0 +1,16 @@
+{"idx": 0, "id": 42198, "em": 0.0, "f1": 0.0, "sub_em": 0.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.034547, "cum_output_tokens": 0.0}
+{"idx": 1, "id": 57612, "em": 0.0, "f1": 0.0, "sub_em": 0.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.044885, "cum_output_tokens": 1134.0}
+{"idx": 2, "id": "41-47", "em": 0.0, "f1": 0.0, "sub_em": 0.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.141988, "cum_output_tokens": 17716.0}
+{"idx": 3, "id": "24-23", "em": 0.0, "f1": 0.0, "sub_em": 0.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.168719, "cum_output_tokens": 22170.0}
+{"idx": 4, "id": "254-34", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.198744, "cum_output_tokens": 27181.0}
+{"idx": 5, "id": "230-16", "em": 0.0, "f1": 0.0, "sub_em": 0.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.249086, "cum_output_tokens": 27181.0}
+{"idx": 6, "id": "79-7", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.266872, "cum_output_tokens": 28407.0}
+{"idx": 7, "id": 50486, "em": 0.0, "f1": 0.0, "sub_em": 0.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.285809, "cum_output_tokens": 28407.0}
+{"idx": 8, "id": 50324, "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.321693, "cum_output_tokens": 32869.0}
+{"idx": 9, "id": 42216, "em": 0.0, "f1": 0.0, "sub_em": 0.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.382816, "cum_output_tokens": 32869.0}
+{"idx": 10, "id": "469-9", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.409129, "cum_output_tokens": 35658.0}
+{"idx": 11, "id": 50952, "em": 0.0, "f1": 0.0, "sub_em": 0.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.434153, "cum_output_tokens": 38221.0}
+{"idx": 12, "id": "141-20", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.476382, "cum_output_tokens": 44206.0}
+{"idx": 13, "id": 53449, "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.501718, "cum_output_tokens": 46937.0}
+{"idx": 14, "id": "472-15", "em": 0.0, "f1": 0.0, "sub_em": 0.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.520113, "cum_output_tokens": 48204.0}
+{"idx": 15, "id": "409-45", "em": 0.0, "f1": 0.0, "sub_em": 0.0, "pred": "(python code)", "n_bullets": 0, "cum_cost_usd": 0.57061, "cum_output_tokens": 55735.0}

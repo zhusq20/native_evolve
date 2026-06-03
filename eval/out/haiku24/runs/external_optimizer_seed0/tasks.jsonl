@@ -1,0 +1,24 @@
+{"idx": 0, "id": "e7528ab96f1a4351bdff5a095bff1b35", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Rocky", "n_bullets": 0, "cum_cost_usd": 0.167181, "cum_output_tokens": 5115.0}
+{"idx": 1, "id": "d0fe0bd7e0e04306b79057d5df23d4bf", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "alcohol", "n_bullets": 0, "cum_cost_usd": 0.183541, "cum_output_tokens": 5405.0}
+{"idx": 2, "id": "7f10d17a459c48d9982e6d322d5dadf3", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "London", "n_bullets": 0, "cum_cost_usd": 0.199629, "cum_output_tokens": 5732.0}
+{"idx": 3, "id": "92f561fa92ff4000b53764ff9bd1bc3c", "em": 0.0, "f1": 0.8, "sub_em": 1.0, "pred": "FIFA World Cup", "n_bullets": 0, "cum_cost_usd": 0.216583, "cum_output_tokens": 6179.0}
+{"idx": 4, "id": "5ada43ba21394ff58c8875db16c2fb4a", "em": 0.0, "f1": 0.0, "sub_em": 1.0, "pred": "ATM", "n_bullets": 0, "cum_cost_usd": 0.233037, "cum_output_tokens": 6527.0}
+{"idx": 5, "id": "e0acb276ede24379b3d89f22718417a2", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Huguenots", "n_bullets": 0, "cum_cost_usd": 0.251299, "cum_output_tokens": 7285.0}
+{"idx": 6, "id": "3a656d6e2d724c03b63541d3f758f1f1", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "carriage", "n_bullets": 0, "cum_cost_usd": 0.268649, "cum_output_tokens": 7778.0}
+{"idx": 7, "id": "017960364b3546859e6057abebaf9665", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Joseph Smith", "n_bullets": 0, "cum_cost_usd": 0.283494, "cum_output_tokens": 8049.0}
+{"idx": 8, "id": "891ee395238c47eb8ba9a645058638ce", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "DDT", "n_bullets": 0, "cum_cost_usd": 0.298475, "cum_output_tokens": 8352.0}
+{"idx": 9, "id": "3501941d3d5b4b1b95cd4a0ccac7687f", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Texas", "n_bullets": 0, "cum_cost_usd": 0.317533, "cum_output_tokens": 9200.0}
+{"idx": 10, "id": "50260efa500944f8b48b4397f7630cfa", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "tried & treed", "n_bullets": 0, "cum_cost_usd": 0.332186, "cum_output_tokens": 9558.0}
+{"idx": 11, "id": "6e065119e0004def99b1534c5580be6e", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Willa Cather", "n_bullets": 0, "cum_cost_usd": 0.348206, "cum_output_tokens": 9753.0}
+{"idx": 12, "id": "5b3b5778cbbf480d8faa1558da5075ad", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "William Bradford", "n_bullets": 0, "cum_cost_usd": 0.36442, "cum_output_tokens": 10052.0}
+{"idx": 13, "id": "d9bf831ca84a4d778e20e5dfa93c4bdd", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Toyota", "n_bullets": 0, "cum_cost_usd": 0.380449, "cum_output_tokens": 10344.0}
+{"idx": 14, "id": "b6f8fd5503b34aeabcd262c5db0647f6", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Mel Blanc", "n_bullets": 0, "cum_cost_usd": 0.396659, "cum_output_tokens": 10668.0}
+{"idx": 15, "id": "699cd913e1994f2e8d0af804a537f19d", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Boston Massacre", "n_bullets": 0, "cum_cost_usd": 0.412568, "cum_output_tokens": 10907.0}
+{"idx": 16, "id": "39eb0eee961849f980899754daa0e6fc", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Orestes", "n_bullets": 0, "cum_cost_usd": 0.428971, "cum_output_tokens": 11242.0}
+{"idx": 17, "id": "126d1586adf74c42926c7bbd5081d329", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "L. Frank Baum", "n_bullets": 0, "cum_cost_usd": 0.445478, "cum_output_tokens": 11491.0}
+{"idx": 18, "id": "12692cce4f124fc2893d040bc78b1f90", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "bus", "n_bullets": 0, "cum_cost_usd": 0.46178, "cum_output_tokens": 11730.0}
+{"idx": 19, "id": "f6ed17015c094c6681cb9e47bd71a753", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Alaska", "n_bullets": 0, "cum_cost_usd": 0.47815, "cum_output_tokens": 11987.0}
+{"idx": 20, "id": "7b1bc47134d249feac8d44365ce0e562", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Guadalajara", "n_bullets": 0, "cum_cost_usd": 0.495347, "cum_output_tokens": 12405.0}
+{"idx": 21, "id": "9a294828cd60428ebcfe811f613e9d2c", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "NPR", "n_bullets": 0, "cum_cost_usd": 0.512541, "cum_output_tokens": 12869.0}
+{"idx": 22, "id": "91a2ec25857d4214b9aaacc3f76ad8af", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Ned Flanders", "n_bullets": 0, "cum_cost_usd": 0.529534, "cum_output_tokens": 13180.0}
+{"idx": 23, "id": "5e80fa581fcf4de0bfd005e5d921287e", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Ordinary People", "n_bullets": 0, "cum_cost_usd": 0.546314, "cum_output_tokens": 13495.0}

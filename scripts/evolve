@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""native_evolve CLI.
+
+Subcommands:
+  status                       show memory + skill stats
+  retrieve "<text>"            preview what memory would be injected for a prompt
+  reflect --transcript PATH    run reflection on a finished session (manual trigger)
+  seed                         create dirs + a couple of example bullets
+  doctor                       check the environment (python / claude / paths)
+  install-claude --into DIR    deploy a copy into another project (hooks point at it)
+"""
+import argparse
+import json
+import os
+import pathlib
+import shutil
+import sys
+
+HOME = pathlib.Path(__file__).resolve().parents[1]
+os.environ.setdefault("NATIVE_EVOLVE_HOME", str(HOME))
+sys.path.insert(0, str(HOME))
+
+from evolve import config, retrieve, reflect, store  # noqa: E402
+
+
+def cmd_status(_):
+    items = store.load()
+    active = [b for b in items if b.get("status") == "active"]
+    promoted = [b for b in items if b.get("status") == "promoted"]
+    deprecated = [b for b in items if b.get("status") == "deprecated"]
+    skills = store.load_skill_state()
+    print("native_evolve status  (HOME=%s)" % config.HOME)
+    print("  memory bullets : %d total | %d active | %d promoted | %d deprecated"
+          % (len(items), len(active), len(promoted), len(deprecated)))
+    live = [n for n, r in skills.items() if r.get("status") == "active"]
+    cand = [n for n, r in skills.items() if r.get("status") == "candidate"]
+    print("  skills         : %d live %s | %d candidate %s"
+          % (len(live), live or "", len(cand), cand or ""))
+    top = sorted(active, key=lambda b: b.get("helpful", 0), reverse=True)[:5]
+    if top:
+        print("  top bullets:")
+        for b in top:
+            print("    [%s] h=%d u=%d  %s"
+                  % (b["id"], b.get("helpful", 0), b.get("uses", 0), b.get("content", "")[:70]))
+
+
+def cmd_retrieve(args):
+    block = retrieve.context_block(args.text)
+    print(block or "(no relevant memory)")
+
+
+def cmd_reflect(args):
+    n = reflect.run(transcript_path=args.transcript)
+    print("merged %d delta(s)" % n)
+
+
+def cmd_setup(_):
+    """Create dirs + link .claude/skills -> ./skills so promoted skills stay visible."""
+    for d in (config.MEMORY_DIR, config.REPLAY_DIR, config.SKILLS_DIR, config.CANDIDATE_DIR):
+        d.mkdir(parents=True, exist_ok=True)
+    config.ensure_skill_link()
+    tgt = os.readlink(config.CLAUDE_SKILLS_LINK) if config.CLAUDE_SKILLS_LINK.is_symlink() else "(real dir)"
+    print("setup complete")
+    print("  visible skills dir :", config.SKILLS_DIR)
+    print("  harness link       :", config.CLAUDE_SKILLS_LINK, "->", tgt)
+
+
+def cmd_seed(_):
+    for d in (config.MEMORY_DIR, config.REPLAY_DIR, config.SKILLS_DIR, config.CANDIDATE_DIR):
+        d.mkdir(parents=True, exist_ok=True)
+    config.ensure_skill_link()
+    if not store.load():
+        from evolve import curate
+        curate.merge([
+            {"op": "add", "type": "heuristic",
+             "content": "Before writing spreadsheet formulas, verify the real header row "
+                        "index by printing the first few rows with Bash.",
+             "scope": "spreadsheet"},
+            {"op": "add", "type": "pitfall",
+             "content": "Do not assume row 1 is the header; a title row above it shifts "
+                        "every column reference.",
+             "scope": "spreadsheet"},
+        ])
+    print("seeded. store=%s" % config.STORE)
+
+
+def cmd_doctor(_):
+    print("python      :", sys.version.split()[0])
+    print("HOME        :", config.HOME)
+    print("claude bin  :", shutil.which(config.CLAUDE_BIN) or "(NOT FOUND: %s)" % config.CLAUDE_BIN)
+    print("codex bin   :", shutil.which(config.CODEX_BIN) or "(not found: %s)" % config.CODEX_BIN)
+    print("store       :", config.STORE, "exists" if config.STORE.exists() else "(missing)")
+    print("settings    :", (config.HOME / ".claude" / "settings.json"))
+    link = config.CLAUDE_SKILLS_LINK
+    state = ("-> %s" % os.readlink(link)) if link.is_symlink() else ("real dir" if link.exists() else "missing (run: evolve setup)")
+    print("skills link :", link, state)
+    print("skills dir  :", config.SKILLS_DIR, "(%d skills)" % len(list(config.SKILLS_DIR.glob("*/SKILL.md"))) if config.SKILLS_DIR.exists() else "(missing)")
+
+
+def cmd_install_claude(args):
+    target = pathlib.Path(args.into).resolve()
+    dest = target / ".native_evolve"
+    if dest.exists():
+        print("refusing to overwrite", dest)
+        return 1
+    shutil.copytree(
+        HOME, dest,
+        ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".claude"),
+    )
+    # write hooks into the target project's settings, pointing at the copied code,
+    # with NATIVE_EVOLVE_HOME=.native_evolve so memory + prompts resolve there.
+    base = "NATIVE_EVOLVE_HOME=\"$CLAUDE_PROJECT_DIR/.native_evolve\" python3 " \
+           "\"$CLAUDE_PROJECT_DIR/.native_evolve/adapters/claude_code/%s\""
+    hooks = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {"hooks": [{"type": "command", "command": base % "hook_user_prompt_submit.py"}]}
+            ],
+            "Stop": [
+                {"hooks": [{"type": "command", "command": base % "hook_stop.py"}]}
+            ],
+        }
+    }
+    cdir = target / ".claude"
+    cdir.mkdir(parents=True, exist_ok=True)
+    spath = cdir / "settings.json"
+    existing = {}
+    if spath.exists():
+        try:
+            existing = json.loads(spath.read_text())
+        except Exception:
+            existing = {}
+    existing.setdefault("hooks", {}).update(hooks["hooks"])
+    spath.write_text(json.dumps(existing, indent=2))
+    print("installed into", dest)
+    print("wrote hooks ->", spath)
+    print("launch `claude` inside", target, "to activate.")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="evolve")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("status").set_defaults(fn=cmd_status)
+    sub.add_parser("setup").set_defaults(fn=cmd_setup)
+    p = sub.add_parser("retrieve"); p.add_argument("text"); p.set_defaults(fn=cmd_retrieve)
+    p = sub.add_parser("reflect"); p.add_argument("--transcript", required=True); p.set_defaults(fn=cmd_reflect)
+    sub.add_parser("seed").set_defaults(fn=cmd_seed)
+    sub.add_parser("doctor").set_defaults(fn=cmd_doctor)
+    p = sub.add_parser("install-claude"); p.add_argument("--into", required=True); p.set_defaults(fn=cmd_install_claude)
+    args = ap.parse_args()
+    sys.exit(args.fn(args) or 0)
+
+
+if __name__ == "__main__":
+    main()

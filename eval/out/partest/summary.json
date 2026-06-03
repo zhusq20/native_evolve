@@ -1,0 +1,10 @@
+{
+  "no_memory": {
+    "final_preq_em": 1.0,
+    "final_preq_f1": 1.0,
+    "first_half_em": 1.0,
+    "second_half_em": 1.0,
+    "total_cost_usd": 0.0199,
+    "final_bullets": 0.0
+  }
+}

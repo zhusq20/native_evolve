@@ -1,0 +1,6 @@
+{"idx": 0, "id": "e7528ab96f1a4351bdff5a095bff1b35", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Rocky", "n_bullets": 0, "cum_cost_usd": 0.042973, "cum_output_tokens": 24.0}
+{"idx": 1, "id": "d0fe0bd7e0e04306b79057d5df23d4bf", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "alcohol", "n_bullets": 0, "cum_cost_usd": 0.088788, "cum_output_tokens": 48.0}
+{"idx": 2, "id": "7f10d17a459c48d9982e6d322d5dadf3", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "London", "n_bullets": 0, "cum_cost_usd": 0.13112, "cum_output_tokens": 69.0}
+{"idx": 3, "id": "92f561fa92ff4000b53764ff9bd1bc3c", "em": 0.0, "f1": 0.0, "sub_em": 0.0, "pred": "twice", "n_bullets": 3, "cum_cost_usd": 0.18604, "cum_output_tokens": 640.0}
+{"idx": 4, "id": "5ada43ba21394ff58c8875db16c2fb4a", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "ATMs", "n_bullets": 3, "cum_cost_usd": 0.265579, "cum_output_tokens": 664.0}
+{"idx": 5, "id": "e0acb276ede24379b3d89f22718417a2", "em": 0.0, "f1": 0.0, "sub_em": 0.0, "pred": "Charlesfort", "n_bullets": 5, "cum_cost_usd": 0.356635, "cum_output_tokens": 1191.0}

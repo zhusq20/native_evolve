@@ -1,0 +1,24 @@
+{"idx": 0, "id": "12692cce4f124fc2893d040bc78b1f90", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "bus", "n_bullets": 0, "cum_cost_usd": 0.014016, "cum_output_tokens": 624.0}
+{"idx": 1, "id": "e3452cd297f04982b80fc48c45d6973b", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "San Antonio", "n_bullets": 0, "cum_cost_usd": 0.031009, "cum_output_tokens": 1949.0}
+{"idx": 2, "id": "6651ec8baf2a42e0b2f704c9b38a2044", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Hemingway", "n_bullets": 0, "cum_cost_usd": 0.053853, "cum_output_tokens": 2913.0}
+{"idx": 3, "id": "891ee395238c47eb8ba9a645058638ce", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "DDT", "n_bullets": 0, "cum_cost_usd": 0.07837, "cum_output_tokens": 4363.0}
+{"idx": 4, "id": "699cd913e1994f2e8d0af804a537f19d", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "The Boston Massacre", "n_bullets": 0, "cum_cost_usd": 0.093228, "cum_output_tokens": 5199.0}
+{"idx": 5, "id": "865ecb87fc29468da9bc7fdb53c855a9", "em": 0.0, "f1": 0.1904761904761905, "sub_em": 1.0, "pred": "\"On the Waterfront\" \u2014 a 1954 dockside drama directed by Elia Kazan, starring Mar", "n_bullets": 1, "cum_cost_usd": 0.118224, "cum_output_tokens": 6526.0}
+{"idx": 6, "id": "6e065119e0004def99b1534c5580be6e", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Willa Cather", "n_bullets": 1, "cum_cost_usd": 0.141985, "cum_output_tokens": 7465.0}
+{"idx": 7, "id": "8da4cdbf5ede473e80797b67e8869735", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Stephen Vincent Benet", "n_bullets": 1, "cum_cost_usd": 0.1766, "cum_output_tokens": 9166.0}
+{"idx": 8, "id": "f6ed17015c094c6681cb9e47bd71a753", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Alaska", "n_bullets": 1, "cum_cost_usd": 0.200678, "cum_output_tokens": 10172.0}
+{"idx": 9, "id": "5ada43ba21394ff58c8875db16c2fb4a", "em": 0.0, "f1": 0.0, "sub_em": 1.0, "pred": "ATM", "n_bullets": 2, "cum_cost_usd": 0.228875, "cum_output_tokens": 12159.0}
+{"idx": 10, "id": "017960364b3546859e6057abebaf9665", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Joseph Smith", "n_bullets": 2, "cum_cost_usd": 0.252528, "cum_output_tokens": 13283.0}
+{"idx": 11, "id": "3501941d3d5b4b1b95cd4a0ccac7687f", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Texas", "n_bullets": 2, "cum_cost_usd": 0.284449, "cum_output_tokens": 15959.0}
+{"idx": 12, "id": "3a656d6e2d724c03b63541d3f758f1f1", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "a carriage", "n_bullets": 2, "cum_cost_usd": 0.317207, "cum_output_tokens": 17354.0}
+{"idx": 13, "id": "92f561fa92ff4000b53764ff9bd1bc3c", "em": 0.0, "f1": 0.8, "sub_em": 1.0, "pred": "FIFA World Cup", "n_bullets": 3, "cum_cost_usd": 0.35039, "cum_output_tokens": 18789.0}
+{"idx": 14, "id": "d0fe0bd7e0e04306b79057d5df23d4bf", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "alcohol", "n_bullets": 3, "cum_cost_usd": 0.374355, "cum_output_tokens": 19740.0}
+{"idx": 15, "id": "39eb0eee961849f980899754daa0e6fc", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Orestes", "n_bullets": 3, "cum_cost_usd": 0.398612, "cum_output_tokens": 20707.0}
+{"idx": 16, "id": "5b3b5778cbbf480d8faa1558da5075ad", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "William Bradford", "n_bullets": 3, "cum_cost_usd": 0.422353, "cum_output_tokens": 21730.0}
+{"idx": 17, "id": "5e80fa581fcf4de0bfd005e5d921287e", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Ordinary People", "n_bullets": 3, "cum_cost_usd": 0.44767, "cum_output_tokens": 22901.0}
+{"idx": 18, "id": "46cfd150209a4b319ccceb2e96b2c11d", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "California", "n_bullets": 3, "cum_cost_usd": 0.481797, "cum_output_tokens": 24477.0}
+{"idx": 19, "id": "9a294828cd60428ebcfe811f613e9d2c", "em": 0.0, "f1": 0.0, "sub_em": 0.0, "pred": "No. According to the provided context, \"Morning Edition\" and \"All Things Conside", "n_bullets": 6, "cum_cost_usd": 0.521096, "cum_output_tokens": 27047.0}
+{"idx": 20, "id": "126d1586adf74c42926c7bbd5081d329", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "L. Frank Baum", "n_bullets": 6, "cum_cost_usd": 0.546923, "cum_output_tokens": 28200.0}
+{"idx": 21, "id": "b6f8fd5503b34aeabcd262c5db0647f6", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Mel Blanc", "n_bullets": 6, "cum_cost_usd": 0.577914, "cum_output_tokens": 29097.0}
+{"idx": 22, "id": "e09582fb71994b34bd2d49dd53816c47", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Antonio Banderas", "n_bullets": 6, "cum_cost_usd": 0.608912, "cum_output_tokens": 29955.0}
+{"idx": 23, "id": "d32905148f0246ee86203edb4e025a6b", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "prostate cancer", "n_bullets": 6, "cum_cost_usd": 0.632196, "cum_output_tokens": 30689.0}

@@ -1,0 +1,3 @@
+# native_evolve runtime deps. Python 3.9+ (stdlib-only core; openpyxl only for the
+# spreadsheetbench env). The LLM is the `claude` CLI — NOT a pip package.
+openpyxl>=3.1
