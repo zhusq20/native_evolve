@@ -49,7 +49,7 @@ def main():
     ap.add_argument("--n", type=int, default=10)
     ap.add_argument("--methods", default="no_memory,ours_full")
     ap.add_argument("--seeds", default="0")
-    ap.add_argument("--outdir", default="eval/out/smoke")
+    ap.add_argument("--outdir", default="results/smoke")
     ap.add_argument("--train_n", type=int, default=12,
                     help="external_optimizer: # disjoint offline training tasks")
     ap.add_argument("--workers", type=int, default=1,

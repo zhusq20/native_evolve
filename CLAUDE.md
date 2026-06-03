@@ -22,38 +22,45 @@ Two scientific claims under test:
 - **No pandas** installed → the spreadsheet codegen prompt says "openpyxl only".
 - **Determinism rule**: an LLM never rewrites memory wholesale (ACE context-collapse).
   Curation is deterministic Python; only `claude` does reflect / skill-draft / gate.
-- **Skills are visible**: promoted skills live in `./skills/` (git-tracked); `.claude/skills`
-  is a generated symlink → `../skills` so the harness still auto-discovers them.
-  Run `python3 scripts/evolve setup` after a fresh clone to (re)create the symlink + dirs.
+- **Skills are visible**: promoted skills live in `engine/skills/` (git-tracked);
+  `engine/.claude/skills` is a generated symlink → `../skills` so the harness still
+  auto-discovers them. Run `python3 engine/scripts/evolve setup` after a fresh clone.
 
 ## Environment
 ```bash
 pip install -r requirements.txt                 # openpyxl
 export NATIVE_EVOLVE_CLAUDE_BIN=$(command -v claude || echo ~/.local/bin/claude)
 export NATIVE_EVOLVE_MODEL=haiku                 # cheap target for experiments; "" = harness default
-python3 scripts/evolve setup                     # dirs + .claude/skills symlink
-python3 scripts/evolve doctor                    # sanity check (python/claude/paths/skills)
+python3 engine/scripts/evolve setup             # dirs + engine/.claude/skills symlink
+python3 engine/scripts/evolve doctor            # sanity check (python/claude/paths/skills)
 ```
 Data: SpreadsheetBench is gitignored (38 MB). Re-fetch — see `docs/PROGRESS.md` → "Data".
 SearchQA tasks file (`eval/data/searchqa_val.jsonl`) is tracked.
 
-## Layout
+## Layout — 3 layers
 ```
-evolve/          self-evolution engine (deterministic except llm.py)
-  config.py      paths/thresholds/binaries + ensure_skill_link()
-  store, retrieve, curate, promote, reflect, llm
-adapters/        claude_code (hooks) + codex (wrapper)   ← deployment
-eval/            experiment harness (the research half)
-  run.py         dispatch (method,seed) runs; --workers parallelizes across runs
-  prequential.py one run: test-then-train stream over a task file; --env, --method
-  envs/          searchqa.py, gsm8k.py, spreadsheetbench.py (+ sb_lib/ exec+eval)
-  external_opt.py  SkillOpt-style offline optimizer baseline
-  plot.py        pure-python SVG figures from out/<exp>/runs/*
-  fetch.py       materialize task files for envs that implement fetch()
-prompts/         reflector.md, skill_writer.md, external_optimizer.md
-memory/          store.jsonl, skill_state.json, replay/ (promotion-gate cases)
-skills/          promoted skills (VISIBLE; .claude/skills symlinks here)
-docs/            PROGRESS.md (state) + design docs
+ROOT = research/optimization workspace (where you work to improve the engine)
+  CLAUDE.md  README.md  requirements.txt
+  docs/            PROGRESS.md (state) + design docs
+  eval/            experiment harness — the apparatus that optimizes/measures
+    run.py         dispatch (method,seed) runs; --workers parallelizes across runs
+    prequential.py one run: test-then-train stream; --env, --method; imports engine/evolve
+    envs/          searchqa.py, gsm8k.py, spreadsheetbench.py (+ sb_lib/ exec+eval)
+    external_opt.py  SkillOpt-style offline optimizer baseline
+    plot.py        pure-python SVG figures;  fetch.py  materialize task files
+    data/          task inputs (searchqa tracked; spreadsheet/ gitignored)
+
+engine/ = OBJECT UNDER STUDY (the deployable self-evolution system we improve)
+  evolve/          config, store, retrieve, curate, promote, reflect, llm
+  adapters/        claude_code (hooks) + codex (wrapper)
+  prompts/         reflector.md, skill_writer.md, external_optimizer.md
+  memory/          store.jsonl, skill_state.json, replay/ (promotion-gate cases)
+  skills/          promoted skills (VISIBLE; engine/.claude/skills symlinks here)
+  scripts/evolve   CLI: setup/seed/status/doctor/retrieve/reflect/install-claude
+  .claude/         settings.json (hooks) + skills symlink   ← deploy: `cd engine && claude`
+
+results/ = experiment data + figures (one subdir per experiment)
+  <exp>/curve.csv  summary.json  fig_*.svg  runs/<method>_seed<k>/tasks.jsonl
 ```
 
 ## Key commands
@@ -61,8 +68,8 @@ docs/            PROGRESS.md (state) + design docs
 # run an experiment (4 methods, 2 seeds, parallel across the 8 runs)
 python3 eval/run.py --tasks eval/data/searchqa_val.jsonl --env searchqa --n 24 \
   --methods no_memory,external_optimizer,ace,ours_full --seeds 0,1 --workers 4 \
-  --outdir eval/out/<name>
-python3 eval/plot.py eval/out/<name>            # -> fig_learning_curve.svg, fig_acc_vs_cost.svg
+  --outdir results/<name>
+python3 eval/plot.py results/<name>             # -> fig_learning_curve.svg, fig_acc_vs_cost.svg
 
 # methods: no_memory | ours_full | ace | external_optimizer
 # envs:    searchqa | spreadsheetbench | gsm8k(too easy, deprecated)

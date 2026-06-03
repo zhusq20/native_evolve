@@ -19,7 +19,8 @@ import random
 import shutil
 import sys
 
-CODE_DIR = pathlib.Path(__file__).resolve().parents[1]
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+ENGINE_DIR = REPO_ROOT / "engine"   # the object under study (evolve/ prompts/ memory/ ...)
 
 
 def prepare_home(home):
@@ -29,7 +30,14 @@ def prepare_home(home):
     # prompts must live under HOME (config resolves them there)
     dst = home / "prompts"
     if not dst.exists():
-        shutil.copytree(CODE_DIR / "prompts", dst)
+        shutil.copytree(ENGINE_DIR / "prompts", dst)
+    # seed the promotion-gate replay cases so the gate can actually verify in experiments
+    src_replay = ENGINE_DIR / "memory" / "replay"
+    if src_replay.exists():
+        for case in src_replay.glob("*.json"):
+            tgt = home / "memory" / "replay" / case.name
+            if not tgt.exists():
+                shutil.copy(str(case), str(tgt))
     (home / "memory" / "store.jsonl").touch()
     (home / "memory" / "skill_state.json").write_text("{}", encoding="utf-8")
 
@@ -57,7 +65,7 @@ def main():
     ledger.write_text("", encoding="utf-8")
     os.environ["NATIVE_EVOLVE_LEDGER"] = str(ledger)
     prepare_home(args.home)
-    sys.path.insert(0, str(CODE_DIR))
+    sys.path.insert(0, str(ENGINE_DIR))
 
     from evolve import retrieve, reflect, store  # noqa: E402
     sys.path.insert(0, str(pathlib.Path(__file__).parent))

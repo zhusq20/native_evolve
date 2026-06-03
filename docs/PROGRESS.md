@@ -54,7 +54,7 @@ stationary format-bound distribution. ours learns gradually, pays reflection tax
 on diverse tasks → **C2 supported here**. ours (top-k retrieval) > ACE (dump 40 bullets) → **C1 partly supported**.
 - **CRITICAL CAVEAT**: the promotion gate **never fired** (0 skills promoted; helpful≥5 needs a longer
   stream). So at n=16, "ours" = memory + retrieval ONLY; the **skill-promotion tier is UNTESTED**.
-- Base accuracy 0.40 = good mid-range (headroom, no floor/ceiling). Figures: `eval/out/sb_haiku/*.svg`.
+- Base accuracy 0.40 = good mid-range (headroom, no floor/ceiling). Figures: `results/sb_haiku/*.svg`.
 
 **Cross-setting story (the paper's spine):** stationary/format-bound → external offline wins;
 diverse/multi-skill/procedural → native online wins. Each paradigm has its regime.
@@ -95,6 +95,14 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-02  (session 2 — 3-layer restructure)
+- Split repo into layers: **root** = research workspace (docs + `eval/` harness),
+  **`engine/`** = object under study (evolve/adapters/prompts/memory/skills/scripts/.claude),
+  **`results/`** = experiment outputs (moved from `eval/out`).
+- `eval/prequential.py` now imports engine via `ENGINE_DIR`; `prepare_home` copies prompts
+  AND seeds replay cases from `engine/memory/replay` → the promotion gate can now fire in experiments.
+- Deploy is now `cd engine && claude`. Root has no hooks (research session won't self-trigger reflection).
+
 ### 2026-06-02  (session 1 — build + first results)
 - Built engine, hooks, prequential harness, 4 baselines, SVG plots, env-pluggable.
 - Envs: searchqa, gsm8k (deprecated: ceiling), spreadsheetbench (integrated SkillOpt exec/eval).
