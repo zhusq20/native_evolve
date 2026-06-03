@@ -1,18 +1,54 @@
 {
   "ace": {
-    "final_preq_em": 0.8125,
-    "final_preq_f1": 0.8602,
-    "first_half_em": 0.7917,
-    "second_half_em": 0.8333,
-    "total_cost_usd": 0.6519,
-    "final_bullets": 5.5
+    "n_seeds": 2,
+    "n_tasks": 24,
+    "em": 0.8125,
+    "em_per_seed": [
+      0.7917,
+      0.8333
+    ],
+    "first_half": 0.7917,
+    "second_half": 0.8333,
+    "cost_usd": 0.6519,
+    "bullets": 5.5
   },
   "external_optimizer": {
-    "final_preq_em": 0.8958,
-    "final_preq_f1": 0.9208,
-    "first_half_em": 0.875,
-    "second_half_em": 0.9167,
-    "total_cost_usd": 0.5559,
-    "final_bullets": 0.0
+    "n_seeds": 2,
+    "n_tasks": 24,
+    "em": 0.8958,
+    "em_per_seed": [
+      0.9167,
+      0.875
+    ],
+    "first_half": 0.875,
+    "second_half": 0.9167,
+    "cost_usd": 0.5559,
+    "bullets": 0.0
+  },
+  "no_memory": {
+    "n_seeds": 2,
+    "n_tasks": 24,
+    "em": 0.7083,
+    "em_per_seed": [
+      0.6667,
+      0.75
+    ],
+    "first_half": 0.7083,
+    "second_half": 0.7083,
+    "cost_usd": 0.3706,
+    "bullets": 0.0
+  },
+  "ours_full": {
+    "n_seeds": 2,
+    "n_tasks": 24,
+    "em": 0.8333,
+    "em_per_seed": [
+      0.7917,
+      0.875
+    ],
+    "first_half": 0.75,
+    "second_half": 0.9167,
+    "cost_usd": 0.7747,
+    "bullets": 6.0
   }
 }

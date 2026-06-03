@@ -165,22 +165,77 @@ def chart(data, xkey, title, xlabel, out, ymax=1.0):
     print("wrote", out)
 
 
+SHORT = {"no_memory": "no-mem", "external_optimizer": "external", "ace": "ACE",
+         "skillopt": "SkillOpt", "ours_full": "ours"}
+
+
+def bars(data, title, out):
+    """Grouped bars: final prequential EM per method, with per-seed dots + cost label."""
+    methods = [m for m in ORDER if m in data] + [m for m in data if m not in ORDER]
+    W, H = 660, 460
+    L, R, T, B = 64, 24, 56, 70
+    pw, ph = W - L - R, H - T - B
+    n = len(methods)
+    slot = pw / n
+    bw = slot * 0.5
+
+    def Y(v):
+        return T + ph * (1 - v)
+
+    svg = _svg_open(W, H)
+    svg.append(_text(L, 26, title, size=16, weight="bold"))
+    for k in range(0, 6):
+        v = k / 5.0
+        y = Y(v)
+        svg.append(_line(L, y, L + pw, y, "#e8e8e8", 1))
+        svg.append(_text(L - 8, y + 4, "%.1f" % v, size=11, anchor="end", color="#666"))
+    svg.append(_line(L, T, L, T + ph, "#333", 1))
+    svg.append(_line(L, T + ph, L + pw, T + ph, "#333", 1))
+    svg.append(_text(16, T + ph / 2, "final EM", size=12, anchor="middle").replace(
+        "<text", '<text transform="rotate(-90 16 %.1f)"' % (T + ph / 2)))
+
+    for i, m in enumerate(methods):
+        series = data[m]
+        ems = [running_mean(s["em"])[-1] for s in series]
+        em = sum(ems) / len(ems)
+        cost = sum(s["cum_cost"][-1] for s in series) / len(series)
+        cx = L + slot * (i + 0.5)
+        color = COLORS.get(m, "#333")
+        svg.append('<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" fill="%s" fill-opacity="0.85"/>'
+                   % (cx - bw / 2, Y(em), bw, T + ph - Y(em), color))
+        for e in ems:  # per-seed dots
+            svg.append('<circle cx="%.1f" cy="%.1f" r="3.2" fill="#222"/>' % (cx, Y(e)))
+        svg.append(_text(cx, Y(em) - 8, "%.3f" % em, size=12, anchor="middle", weight="bold"))
+        svg.append(_text(cx, T + ph + 18, SHORT.get(m, m), size=12, anchor="middle"))
+        svg.append(_text(cx, T + ph + 34, "$%.2f" % cost, size=10, anchor="middle", color="#666"))
+        svg.append(_text(cx, T + ph + 48, "%.2f EM/$" % (em / cost if cost else 0), size=9,
+                         anchor="middle", color="#999"))
+    svg.append("</svg>")
+    pathlib.Path(out).write_text("\n".join(svg), encoding="utf-8")
+    print("wrote", out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("outdir")
+    ap.add_argument("--title", default="", help="benchmark name shown in titles")
     args = ap.parse_args()
     data = load(args.outdir)
     if not data:
         print("no runs found in", args.outdir)
         return
+    name = args.title or pathlib.Path(args.outdir).name
     seeds = max(len(v) for v in data.values())
+    out = pathlib.Path(args.outdir)
     chart(data, "idx",
-          "Prequential learning curve (SearchQA, %d seed%s)" % (seeds, "s" if seeds > 1 else ""),
-          "task index in stream", str(pathlib.Path(args.outdir) / "fig_learning_curve.svg"))
+          "Prequential learning curve (%s, %d seed%s)" % (name, seeds, "s" if seeds > 1 else ""),
+          "task index in stream", str(out / "fig_learning_curve.svg"))
     chart(data, "cum_cost",
-          "Accuracy vs cumulative cost (SearchQA)",
+          "Accuracy vs cumulative cost (%s)" % name,
           "cumulative cost (USD, incl. self-evolution / training)",
-          str(pathlib.Path(args.outdir) / "fig_acc_vs_cost.svg"))
+          str(out / "fig_acc_vs_cost.svg"))
+    bars(data, "Final accuracy by method (%s, %d seeds)" % (name, seeds),
+         str(out / "fig_final_bars.svg"))
 
 
 if __name__ == "__main__":

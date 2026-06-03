@@ -1,3 +1,0 @@
-method,task_idx,preq_em,preq_f1,cum_cost_usd,n_bullets
-no_memory,0,1.0000,1.0000,0.009659,0.00
-no_memory,1,1.0000,1.0000,0.019946,0.00

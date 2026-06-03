@@ -1,2 +1,0 @@
-{"idx": 0, "id": "e7528ab96f1a4351bdff5a095bff1b35", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "Rocky", "n_bullets": 0, "cum_cost_usd": 0.006779, "cum_output_tokens": 401.0}
-{"idx": 1, "id": "d0fe0bd7e0e04306b79057d5df23d4bf", "em": 1.0, "f1": 1.0, "sub_em": 1.0, "pred": "alcohol", "n_bullets": 0, "cum_cost_usd": 0.014465, "cum_output_tokens": 790.0}

@@ -95,6 +95,13 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-02  (session 3 — analysis + figures + per-experiment docs)
+- Added `fig_final_bars.svg` (final EM + per-seed dots + cost/EM-$ per method) to plot.py; `--title`.
+- Documented everything: `results/README.md` (index + cross-setting spine + how-to-read + caveats),
+  `results/haiku24/README.md` and `results/sb_haiku/README.md` (one section per figure + per data file).
+- Recomputed authoritative `summary.json` (all 4 methods) from `runs/`. Removed throwaway dirs.
+- Full stats locked in: SearchQA external 0.896 > ours 0.833; SpreadsheetBench ours 0.500 > rest 0.375.
+
 ### 2026-06-02  (session 2 — 3-layer restructure)
 - Split repo into layers: **root** = research workspace (docs + `eval/` harness),
   **`engine/`** = object under study (evolve/adapters/prompts/memory/skills/scripts/.claude),
