@@ -12,6 +12,7 @@ import glob
 import json
 import os
 import pathlib
+import shutil
 import sys
 import tempfile
 
@@ -74,6 +75,50 @@ def _answer_position(task):
     return ap
 
 
+def _inspect_target_cells(xlsx_path, answer_position, max_cells=12):
+    """Inspect the cells the grader will read in a produced workbook. `data_only=False`
+    so we SEE whether a cell literally holds a formula string ('=...') — openpyxl stores
+    that string verbatim and never evaluates it, so the grader reads the formula text (or a
+    stale/None cached value) instead of the computed result and marks it wrong. This is the
+    single most common SB failure our trace-blind reflector used to invert. Uses the official
+    evaluator's range parser so the cell set matches exactly. Reads NO gold (the produced
+    workbook only) -> reusable by the reference-free verify() hook."""
+    try:
+        wb = openpyxl.load_workbook(xlsx_path, data_only=False)
+    except Exception as e:  # noqa: BLE001
+        return [{"coord": "?", "note": "could not open produced workbook: %s" % e}]
+    out = []
+    try:
+        for scr in (answer_position or "").split(","):
+            scr = scr.strip()
+            if not scr:
+                continue
+            if "!" in scr:
+                sn, rng = scr.split("!", 1)
+                sn = sn.strip().strip("'\"")
+            else:
+                sn = wb.sheetnames[0]
+                rng = scr
+            rng = rng.strip().strip("'\"")
+            if sn not in wb.sheetnames:
+                out.append({"coord": scr, "note": "sheet %r missing in output" % sn})
+                continue
+            ws = wb[sn]
+            for cn in _evalmod._generate_cell_names(rng):
+                v = ws[cn].value
+                out.append({
+                    "coord": "%s!%s" % (sn, cn),
+                    "value": repr(v)[:60],
+                    "is_formula_string": isinstance(v, str) and v.startswith("="),
+                    "is_none": v is None,
+                })
+                if len(out) >= max_cells:
+                    return out
+    finally:
+        wb.close()
+    return out
+
+
 def _preview(xlsx, max_rows=5, max_cols=20):
     try:
         wb = openpyxl.load_workbook(xlsx, data_only=False)
@@ -129,7 +174,7 @@ def score(task, response):
     cases = _test_cases(_task_dir(task))
     ap = _answer_position(task)
     itype = task.get("instruction_type", "")
-    n_pass, reason = 0, ""
+    n_pass, reason, diag = 0, "", None
     tmp = tempfile.mkdtemp(prefix="sb_")
     try:
         for i, (init, golden) in enumerate(cases):
@@ -137,23 +182,26 @@ def score(task, response):
             ok_exec, err = _exec.run_generated_code(code, init, pred, timeout=60)
             if not ok_exec:
                 reason = reason or ("exec error: " + (err or "")[:240])
+                if diag is None:                  # capture the FIRST failure's full diagnostics
+                    diag = {"executed": False, "traceback": (err or ""),
+                            "cell_reason": "", "target_cells": []}
                 continue
             ev = _evalmod.evaluate(pred, golden, itype, ap)
             if ev.get("ok"):
                 n_pass += 1
             else:
                 reason = reason or ("wrong cells: " + str(ev.get("reason", ""))[:240])
+                if diag is None:                  # inspect pred BEFORE the tempdir is removed
+                    diag = {"executed": True, "traceback": "",
+                            "cell_reason": ev.get("reason", ""),
+                            "target_cells": _inspect_target_cells(pred, ap)}
     finally:
-        try:
-            import shutil
-            shutil.rmtree(tmp, ignore_errors=True)
-        except Exception:
-            pass
+        shutil.rmtree(tmp, ignore_errors=True)
     em = 1.0 if (cases and n_pass == len(cases)) else 0.0
     soft = (n_pass / len(cases)) if cases else 0.0
     return {"em": em, "f1": soft, "sub_em": em, "predicted_answer": "(python code)",
             "gold_answers": ["cells %s" % ap], "_reason": reason,
-            "_npass": n_pass, "_ncases": len(cases), "_code": code}
+            "_npass": n_pass, "_ncases": len(cases), "_code": code, "_diag": diag}
 
 
 def summarize(task, response, ev):
@@ -167,3 +215,92 @@ def summarize(task, response, ev):
            ev.get("_ncases", 0), ev.get("_reason", "") or "(none)",
            (ev.get("_code", "") or "")[:900])
     )
+
+
+def _diagnose(diag):
+    """Turn the structured _diag captured at score time into a grounded, actionable diagnosis.
+    Names the formula-string poison explicitly so the reflector learns the CORRECT lesson
+    (compute literals) instead of its trace-blind inverse."""
+    if not diag:
+        return ""
+    if not diag.get("executed", True):
+        return ("CODE FAILED TO EXECUTE. Full traceback below — fix the exception (do not guess):\n"
+                + (diag.get("traceback") or "")[:1800])
+    parts = []
+    cells = diag.get("target_cells") or []
+    formula = [c for c in cells if c.get("is_formula_string")]
+    nones = [c for c in cells if c.get("is_none")]
+    if formula:
+        parts.append("FORMULA-STRING POISON: the code wrote Excel formula strings into target cells "
+                     + ", ".join(c["coord"] for c in formula[:6]) +
+                     " (e.g. value=" + (formula[0].get("value", "") or "") + "). openpyxl stores the "
+                     "string '=...' verbatim and NEVER evaluates it, so the grader reads the formula "
+                     "text / a None cached value and marks it WRONG. FIX: compute the concrete value in "
+                     "Python and write that literal, not a formula string.")
+    if nones:
+        parts.append("Target cells left EMPTY (None): " + ", ".join(c["coord"] for c in nones[:6]) +
+                     " — the code did not write the expected output cells.")
+    if diag.get("cell_reason"):
+        parts.append("Grader's first mismatch — " + str(diag["cell_reason"]))
+    if cells and not formula and not nones:
+        parts.append("Values written to target cells: "
+                     + "; ".join("%s=%s" % (c["coord"], c.get("value")) for c in cells[:6]))
+    return "\n".join(parts)
+
+
+def evidence(task, response, ev):
+    correct = ev["em"] == 1.0
+    return {
+        "outcome": "PASS" if correct else "FAIL",
+        "task": "SpreadsheetBench (%s): %s"
+                % (task.get("instruction_type", ""), task.get("instruction", "")[:700]),
+        "predicted": "passed %d/%d test cases; answer position %s"
+                     % (ev.get("_npass", 0), ev.get("_ncases", 0), _answer_position(task)),
+        "gold": "the target cells must hold the correct COMPUTED LITERAL values",
+        "diagnosis": "" if correct else _diagnose(ev.get("_diag")),
+        "code": (ev.get("_code", "") or "")[:1200],
+    }
+
+
+def verify(task, attempt):
+    """REFERENCE-FREE check: run the produced code on the INPUT workbook ONLY (never the *_golden*
+    file) and inspect the target cells. Catches the dominant gold-independent failures — no code,
+    a crash, empty targets, or a FORMULA STRING openpyxl won't evaluate. Returns None when there's
+    nothing to check. Reads NO gold, so it is valid during the frozen TEST phase."""
+    code = _extract_code(attempt)
+    if not code.strip() or "```" not in (attempt or ""):   # contract: a single fenced python block
+        return {"ok": False, "signature": "no-code",
+                "feedback": "No ```python``` code block was found in your output. Return a single "
+                            "self-contained fenced python block."}
+    cases = _test_cases(_task_dir(task))
+    if not cases:
+        return None                                  # no input workbook -> cannot verify
+    init = cases[0][0]                               # FIRST case's INPUT only (never golden)
+    ap = _answer_position(task)
+    tmp = tempfile.mkdtemp(prefix="sbv_")
+    try:
+        pred = os.path.join(tmp, "verify_pred.xlsx")
+        ok_exec, err = _exec.run_generated_code(code, init, pred, timeout=60)
+        if not ok_exec:
+            return {"ok": False, "signature": "exec-error",
+                    "feedback": "Your code failed to execute on the input workbook. Full traceback:\n"
+                                + (err or "")[:1200] + "\nFix the exception and try again."}
+        cells = _inspect_target_cells(pred, ap)
+        formula = [c for c in cells if c.get("is_formula_string")]
+        if formula:
+            return {"ok": False, "signature": "formula-string-in-target",
+                    "feedback": "Your code wrote Excel FORMULA STRINGS into target cells "
+                                + ", ".join(c["coord"] for c in formula[:6]) + " (e.g. "
+                                + (formula[0].get("value", "") or "") + "). openpyxl stores '=...' as "
+                                "literal text and never computes it, so the grader reads the formula "
+                                "text and marks it wrong. Compute the value in Python and write the "
+                                "literal result instead of a formula string."}
+        nones = [c for c in cells if c.get("is_none")]
+        if cells and len(nones) == len(cells):
+            return {"ok": False, "signature": "empty-target",
+                    "feedback": "All target cells (%s) are empty after running your code — it did "
+                                "not write the expected output. Write the computed values into the "
+                                "answer cells." % ap}
+        return {"ok": True, "signature": "", "feedback": ""}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)

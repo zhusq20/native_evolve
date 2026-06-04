@@ -94,19 +94,31 @@ two regimes the literature names —
 > inverse. See session-7 changelog + `docs/` for the full SkillOpt investigation.
 
 ## Open questions / NEXT (priority order)
-**TOP PRIORITY (session 7, supersedes the list below):** the SB result is harness-limited, not a
-regime law (see RETRACTED note in Results). So the headline next step is to **fix the apparatus +
-learner and re-test online**:
-- **A. Shallow CONDITIONAL execute→feedback→repair loop** in `eval/envs/spreadsheetbench.py`
-  (1–2 turns, only on failure → cheap). Gives the missing upside AND produces error→fix traces.
-- **B. Trace-grounded reflection** — feed the reflector the real traceback + wrong-cell diff (not a
-  240-char reason); add "never write formula strings; compute literals" to `reflector.md`. Kills the
-  inverse-skill poison so consolidation stops hurting.
-- **C.** Then rerun the SB trio ONLINE (haiku fixed): does ours_full flip from −0.01 to positive? +
-  the cost-advantage curve (ours learns-from-own-traces vs external offline).
-- **D.** Fix the gate's false-pos/neg (online rolling-window A/B instead of a tiny/saturated val set).
-- Carried: complete the 6-method SB headline (ace/external), ≥3 seeds, IFBench (mid-range
-  shared-procedure testbed for a clean skill-value demo).
+**TOP PRIORITY (session 8 UPDATE): the apparatus is BUILT + unit-validated (zero claude spend);
+the remaining step is online validation (Phase 3, pending budget sign-off).** Session 7's SB-specific
+A/B/C/D plan was GENERALIZED into a cross-benchmark feedback taxonomy and implemented as Phases 0–2
+(see session-8 changelog). Mapping of the old plan → what shipped:
+- **A (repair loop) → DONE, GENERAL.** Not SB-only: a uniform `solve()` does single-shot + conditional
+  repair driven by a per-env REFERENCE-FREE `env.verify` (valid even at frozen-test; free when the
+  first attempt passes). `--repair_turns`; repair is ours-only headline + `--repair_methods no_memory`
+  ablation arm. verify() for searchqa/hotpotqa/SB, gold-leak-guarded.
+- **B (trace-grounded reflection) → DONE, GENERAL.** `env.evidence()` (gold-grounded structured diff:
+  full traceback + per-cell diff + formula-string flag for SB; normalized token diff for QA) replaces
+  the 240-char reason; `reflector.md` rewritten around one principle — "match the grader's expected
+  FORM" — of which "compute literals not formula strings" is one instance. Kills the inverse-skill poison.
+- **C (online rerun + cost curve) → Phase 3, NOT YET RUN (needs budget).** Now across THREE regimes
+  (searchqa shared-proc, SB diverse, HotpotQA families) to show the SAME mechanism helps regardless of
+  benchmark nature; + accuracy-vs-TOTAL-cost (ours learns-from-own-traces vs external offline).
+- **D (gate false-pos/neg) → DONE.** `verify.rolling_gate`: accumulate paired A/B across checkpoints,
+  power floor (`--gate_min_n`) + margin (`--gate_margin`) + non-dilution guard → kills false-POSITIVES;
+  reports base-failure rescue / saturation so a no-headroom val reads INCONCLUSIVE (keep as candidate)
+  instead of a silent false-REJECT.
+- Plus NEW (session 8): **signature-keyed episodic** + `repair_hint` (a fix for failure-mode S transfers
+  across lexically-unrelated tasks → turns "diverse / no-shared-procedure" into shared *failure*
+  knowledge), and **repair-trace reflection** (the reflector sees the error→fix path → learns to
+  pre-empt the failure).
+- Carried into Phase 3: complete the 6-method SB headline (ace/external), ≥3 seeds, IFBench (the
+  cleanest reference-free case — its verifiers ARE `env.verify`).
 
 --- earlier list (session 4, partly addressed: frozen protocol + searchqa frozen now DONE) ---
 0. **Add ≥3 seeds to the SB 6-arm scout** to confirm the ordering (episodic ≫ rest at 1 seed,
@@ -150,6 +162,61 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-04  (session 8 — cross-benchmark apparatus redesign: feedback taxonomy, repair loop, trace-grounded reflection)
+User constraint: the涨点 plan must work for benchmarks of DIFFERENT NATURES, not just SB. Reframed
+session-7's SB-specific fixes into a general principle and built it as Phases 0–2. **All code is
+unit-validated with ZERO claude spend; online validation (Phase 3) is the next step, pending budget.**
+
+**The organizing idea — every benchmark affords two feedback channels; the harness now consumes both
+via the env interface (so generality lives in the interface, with per-env bodies that degrade
+gracefully):**
+- **V = reference-free verifier** `env.verify(task, attempt)` — reads NO gold, so valid even at
+  frozen-TEST time; powers the conditional repair loop. Strength varies by env (IFBench: the exact
+  rubric; SB: execute + literal/None check; QA: format + grounding). `None` ⇒ loop never fires.
+- **E = reference-grounded evidence** `env.evidence(task, resp, ev)` — gold allowed (reflection only
+  runs on train tasks); structured diff that the reflector reads. Default falls back to `summarize()`.
+
+**Phase 0 — trace-grounded reflection (general).** `eval/envs/__init__.py` gained `collect_evidence` /
+`render_evidence` / `run_verify` (uniform accessors, safe defaults). `evidence()` for searchqa /
+hotpotqa / spreadsheetbench; SB `score()` now keeps an UNTRUNCATED `_diag` (full traceback + per-cell
+diff + a target-cell inspector that NAMES the formula-string poison via `data_only=False`). Reflection
+(`prequential.py` both sites) routes through evidence; `reflector.md` rewritten around "match the
+grader's expected FORM" (compute-literals / strip-articles are instances). gsm8k untouched → falls back.
+*Validated:* 7/7 — SB poison named with the correct fix, QA token diffs, fallback intact.
+
+**Phase 1 — reference-free conditional repair loop (general).** The 3 call sites (`process` /
+`deploy_parallel` / `serve_one`) collapse into one `solve(task, mem, want_cost)` = single-shot + up to
+`--repair_turns` rounds, each firing ONLY on an `env.verify` rejection; repair cost folds into the
+ledger, the error→fix trace rides on `ev`. Per the user's call, repair is **ours-only** (`--repair_methods
+ours`; baselines single-shot) with `--repair_methods no_memory` as the apparatus-only ABLATION arm (so
+"you just added a repair loop" is answerable). `verify()` for all 3 envs, **provably gold-free** (searchqa
+accepts "Paris" with gold `["TOTALLY-WRONG-GOLD"]`; SB runs on `*_init.xlsx` only, never opens the trap
+golden). Flags threaded through `run.py`. *Validated:* verify on good/bad inputs across 3 envs + the
+repair-loop contract (fires/stops/caps/accrues-cost/builds-trace) via a fake LLM.
+
+**Phase 2 — memory×feedback closure (general).** (a) **signature-keyed episodic** (`episodic.py`):
+`record(...signature=)`, `retrieve_by_signature`, `repair_hint(query, sig)` — a worked fix for failure
+mode S transfers to a lexically-UNRELATED task with the same S (diverse → shared *failure* knowledge);
+`solve()` feeds the hint into repair round ≥2 (retrieval-augmented repair). (b) **repair-trace
+reflection** — `collect_evidence` attaches the error→fix history so the reflector learns to pre-empt the
+failure. (c) **`verify.rolling_gate`** replaces the one-shot tiny-val gate: accumulate paired A/B across
+checkpoints (persisted), activate only on power floor + margin + non-dilution (broke≤rescued) → kills
+false-POSITIVES; report rescue/saturation so a no-headroom val is INCONCLUSIVE not a false-REJECT.
+`--gate_min_n` / `--gate_margin`. *Validated:* signature transfer + graceful-empty; rolling_gate
+accumulation/power/margin/saturation; repair-history rendering (structured + fallback).
+
+**Design decisions.** (1) repair belongs to the ours family — it IS the伴生 inference-time self-correction
+that produces the traces the method learns from; baselines stay single-shot; clean decomposition via the
+`no_memory+repair` ablation arm. (2) Validity guardrail: V never reads gold (asserted per env) so the
+repair loop is legitimate during the frozen TEST phase. (3) Backward-compat: with `--repair_turns 0` and
+no `verify`, behavior reduces to the old single-shot harness; evidence defaults to `summarize`.
+
+**Files:** `eval/envs/{__init__,searchqa,hotpotqa,spreadsheetbench}.py`, `engine/prompts/reflector.md`,
+`engine/evolve/{episodic,verify}.py`, `eval/{prequential,run}.py`.
+**NEXT (Phase 3, needs budget sign-off):** a tiny real-claude smoke to validate end-to-end, then the
+online trio across searchqa/SB/HotpotQA with `--repair_turns 1–2` (ablated 0/1/2), accuracy-vs-total-cost
+vs external, ≥3 seeds; then the rolling-gate false-pos/neg check and IFBench.
+
 ### 2026-06-04  (session 7 — first frozen runs at scale + the SkillOpt-discrepancy correction)
 Ran the first frozen-protocol experiments at SkillOpt sizes, then traced a discrepancy the user
 flagged that **overturns our SB headline conclusion**.

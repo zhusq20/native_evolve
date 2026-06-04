@@ -13,6 +13,7 @@ hide guessing — the runner logs `id`, join back to `type` for the family break
 """
 import json
 import pathlib
+import re
 import sys
 import time
 import urllib.request
@@ -67,6 +68,72 @@ def summarize(task, response, ev):
         % (task.get("type", ""), task.get("level", ""), task["question"],
            (response or "")[:1500], json.dumps(task["answer"]), ev["em"] == 1.0)
     )
+
+
+def _form_diagnosis(task, response, pred, gold):
+    """Grounded form-level diagnosis (train-time, gold allowed)."""
+    notes = []
+    if not response or "<answer>" not in response.lower():
+        notes.append("Output had NO <answer></answer> tag — wrap ONLY the final answer.")
+    np = _scoring.normalize_answer(pred)
+    ng = _scoring.normalize_answer(gold)
+    if task.get("type") == "comparison" and ng in ("yes", "no") and np not in ("yes", "no"):
+        notes.append("This is a COMPARISON question whose answer is %r, but the agent did not "
+                     "answer exactly 'yes'/'no'. Comparison questions resolve to a yes/no verdict; "
+                     "decide the comparison and emit the bare verdict." % gold)
+    notes.append("After normalization: pred=%r vs gold=%r." % (np, ng))
+    pt, gt = np.split(), ng.split()
+    extra = [w for w in pt if w not in gt]
+    missing = [w for w in gt if w not in pt]
+    if extra:
+        notes.append("EXTRA tokens vs gold: %s (too verbose / wrong entity carried over)." % extra)
+    if missing:
+        notes.append("MISSING gold tokens: %s (likely the bridge entity from the other hop was "
+                     "not chained in)." % missing)
+    return "\n".join(notes)
+
+
+def evidence(task, response, ev):
+    gold = task.get("answer", "")
+    correct = ev["em"] == 1.0
+    return {
+        "outcome": "PASS" if correct else "FAIL",
+        "task": "HotpotQA (%s/%s) multi-hop: %s"
+                % (task.get("type", ""), task.get("level", ""), task["question"]),
+        "predicted": "extracted answer: %r  (raw output: %s)"
+                     % (ev.get("predicted_answer", ""), (response or "")[:300]),
+        "gold": json.dumps(gold),
+        "diagnosis": "" if correct else _form_diagnosis(task, response, ev.get("predicted_answer", ""), gold),
+    }
+
+
+def verify(task, attempt):
+    """REFERENCE-FREE format/grounding check. Reads ONLY the task paragraphs + the attempt — NEVER
+    task['answer'] (gold). Same dominant failure modes as SearchQA (missing/empty tag, verbose
+    explanation, ungrounded span). Returns None when nothing is wrong."""
+    text = attempt or ""
+    tags = re.findall(r"<answer>(.*?)</answer>", text, flags=re.IGNORECASE | re.DOTALL)
+    if not tags:
+        return {"ok": False, "signature": "no-answer-tag",
+                "feedback": "Your output had no <answer>...</answer> tag. Wrap ONLY the final answer "
+                            "in <answer></answer> (use exactly 'yes' or 'no' for yes/no questions)."}
+    ans = tags[-1].strip()
+    if not ans:
+        return {"ok": False, "signature": "empty-answer",
+                "feedback": "The <answer> tag was empty. Put the minimal answer span inside it."}
+    if len(ans.split()) > 15:
+        return {"ok": False, "signature": "verbose-answer",
+                "feedback": "Your answer is too long for exact match. Return ONLY the minimal answer "
+                            "span (a name/entity, or exactly 'yes'/'no'), no explanation."}
+    ctx = _context_block(task)
+    if ctx:
+        ctx_tokens = set(_scoring.normalize_answer(ctx).split())
+        ans_tokens = set(_scoring.normalize_answer(ans).split())
+        if ans_tokens and ans.lower() not in ("yes", "no") and not (ans_tokens & ctx_tokens):
+            return {"ok": False, "signature": "ungrounded-answer",
+                    "feedback": "None of your answer's words appear in the provided paragraphs. "
+                                "Chain facts across the paragraphs and extract the exact span."}
+    return {"ok": True, "signature": "", "feedback": ""}
 
 
 def fetch(n, out, split="validation", config="distractor"):

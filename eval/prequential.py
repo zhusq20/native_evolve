@@ -106,6 +106,12 @@ def main():
                          "(e.g. instruction_type for SB, type for HotpotQA). '' = plain shuffle.")
     ap.add_argument("--induce_every", type=int, default=16,
                     help="ours_full: run gated skill consolidation every K tasks (0=off)")
+    ap.add_argument("--gate_min_n", type=int, default=18,
+                    help="rolling consolidation gate: min CUMULATIVE A/B val tasks (across "
+                         "checkpoints) before a skill set may activate (power floor).")
+    ap.add_argument("--gate_margin", type=int, default=2,
+                    help="rolling gate: required cumulative (with-skill minus base) passes; combined "
+                         "with a non-dilution guard (broke <= rescued) to kill false-positives.")
     ap.add_argument("--deploy_workers", type=int, default=1,
                     help="concurrent claude requests for NO-WRITES phases (frozen test deploy; "
                          "and no_memory/external in prequential). Up to ~64; the runner derives "
@@ -119,6 +125,15 @@ def main():
     ap.add_argument("--learn_workers", type=int, default=4,
                     help="serving mode: background reflection workers (the async learner pool). "
                          "Store writes are serialized by STORE_LOCK regardless.")
+    ap.add_argument("--repair_turns", type=int, default=0,
+                    help="max CONDITIONAL repair rounds per task (0=single-shot). A round fires "
+                         "only when env.verify (REFERENCE-FREE, reads no gold) rejects the attempt, "
+                         "so it is valid even at frozen-test time and free when the first attempt "
+                         "verifies. Each round is one extra claude call, billed to the ledger.")
+    ap.add_argument("--repair_methods", default="ours",
+                    help="which methods get the repair loop: 'ours' (episodic/ours_mem/ours_full — "
+                         "the headline; baselines stay single-shot), 'all', or a comma list (e.g. "
+                         "'no_memory' for the apparatus-only ablation arm).")
     ap.add_argument("--home", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -192,16 +207,107 @@ def main():
         if not cands:
             return
         skill_block = "## Candidate skills (apply if relevant):\n\n" + "\n\n".join(c["md"] for c in cands)
-        bp, fp, vn = verify.lift_over_base(skill_block, base_block, verify_tasks, env,
-                                           workers=args.deploy_workers)
-        activate = vn > 0 and fp > bp
+        bp, fp, vn, activate, info = verify.rolling_gate(
+            skill_block, base_block, verify_tasks, env,
+            state_path=str(home / "memory" / "gate_window.json"),
+            workers=args.deploy_workers, min_n=args.gate_min_n, margin=args.gate_margin)
         for c in cands:
             induce.write_skill(c, status=("active" if activate else "candidate"))
-        sys.stderr.write("[consolidate @%d] gate: base %d -> +skills %d (of %d) => %s\n"
-                         % (idx, bp, fp, vn,
-                            ("ACTIVATE %d skills" % len(cands)) if activate else "REJECT (degrade)"))
+        sys.stderr.write("[consolidate @%d] rolling gate: cum base %d -> +skills %d (n=%d, "
+                         "rescued=%d broke=%d sat=%s) => %s\n"
+                         % (idx, bp, fp, vn, info["rescued"], info["broke"],
+                            info["decision"]["saturated"],
+                            ("ACTIVATE %d skills" % len(cands)) if activate
+                            else "REJECT/candidate (degrade)"))
 
     LEARN_METHODS = ("episodic", "ours_mem", "ours_full", "ace")
+    OURS_METHODS = ("episodic", "ours_mem", "ours_full")
+
+    def _repair_budget():
+        """How many repair rounds THIS method gets. Headline: repair belongs to the 'ours'
+        family (it is the inference-time self-correction that also produces the error->fix traces
+        the method learns from); baselines stay single-shot. --repair_methods overrides the set
+        (e.g. 'no_memory' for the apparatus-only ablation, 'all' to repair every arm)."""
+        if args.repair_turns <= 0:
+            return 0
+        sel = (args.repair_methods or "ours").strip().lower()
+        if sel == "all":
+            allowed = set(("no_memory",) + LEARN_METHODS + ("external_optimizer",))
+        elif sel == "ours":
+            allowed = set(OURS_METHODS)
+        else:
+            allowed = set(s.strip() for s in sel.split(",") if s.strip())
+        return args.repair_turns if args.method in allowed else 0
+
+    REPAIR_TURNS = _repair_budget()
+
+    def _repair_suffix(vr, hint):
+        s = ("\n\n## Your previous attempt FAILED an automatic check\n"
+             + (vr.get("feedback") or "(no detail)") +
+             "\n\nFix exactly that problem and return ONLY the corrected final output in the "
+             "required format. Do not repeat the mistake above.")
+        if hint:
+            s += "\n\n## A fix that worked on a past similar failure (adapt, don't copy)\n" + hint
+        return s
+
+    def solve(task, mem_block, want_cost=False):
+        """Single-shot target call + up to REPAIR_TURNS CONDITIONAL repair rounds. A round fires
+        only when env.verify (REFERENCE-FREE; reads no gold) rejects the attempt, so the loop is
+        valid even during the frozen TEST phase and costs nothing when the first attempt verifies.
+        Returns (resp, ev, meta) with meta = {repair_calls, signatures, cost, trace}; `trace` is the
+        list of error->fix pairs used by repair-grounded reflection (Phase 2)."""
+        base = env.build_prompt(task, mem_block)
+        cost = [0.0]
+
+        def _call(prompt):
+            if want_cost:
+                r, c = llm.call_claude(prompt, allowed_tools="Read", return_cost=True)
+                cost[0] += c
+                return r
+            return llm.call_claude(prompt, allowed_tools="Read")
+
+        try:
+            resp = _call(base)
+        except Exception as exc:
+            resp = ""
+            sys.stderr.write("target error: %s\n" % exc)
+        sigs, trace, ncalls = [], [], 0
+        for _ in range(REPAIR_TURNS):
+            try:
+                vr = envs_pkg.run_verify(env, task, resp)
+            except Exception:
+                vr = None
+            if not vr or vr.get("ok"):
+                break
+            sig = vr.get("signature", "")
+            hint = ""
+            hint_fn = getattr(episodic, "repair_hint", None)     # Phase 2 fills this in
+            if hint_fn and args.method in ("episodic", "ours_full"):
+                try:
+                    hint = hint_fn(task.get("question", ""), sig)
+                except Exception:
+                    hint = ""
+            prev = resp
+            try:
+                resp = _call(base + _repair_suffix(vr, hint))
+            except Exception as exc:
+                sys.stderr.write("repair call error: %s\n" % exc)
+                resp = prev
+                break
+            sigs.append(sig)
+            trace.append({"signature": sig, "feedback": vr.get("feedback", ""),
+                          "before": prev, "after": resp})
+            ncalls += 1
+        try:
+            ev = env.score(task, resp)
+        except Exception as exc:
+            sys.stderr.write("score error: %s\n" % exc)
+            ev = {"em": 0.0, "f1": 0.0, "sub_em": 0.0, "predicted_answer": ""}
+        if isinstance(ev, dict) and trace:               # let reflection see the error->fix path
+            ev["_repair_trace"] = trace                  # (rendered into evidence via collect_evidence)
+            ev["_repair_signatures"] = sigs              # failure modes overcome (-> episodic signature)
+        return resp, ev, {"repair_calls": ncalls, "signatures": sigs,
+                          "cost": cost[0], "trace": trace}
 
     def inject(task):
         """Build the injected memory/skill block for the current method (read-only retrieval)."""
@@ -229,18 +335,14 @@ def main():
         Deployment (learn=False) is pure inference on a FROZEN store: the held-out test phase."""
         q = task["question"]
         mem_block, injected_ids = inject(task)
-        try:
-            resp = llm.call_claude(env.build_prompt(task, mem_block), allowed_tools="Read")
-        except Exception as exc:
-            resp = ""
-            sys.stderr.write("target error @%d: %s\n" % (idx, exc))
-        ev = env.score(task, resp)
+        resp, ev, meta = solve(task, mem_block)
 
         if learn:
             # record the RAW EPISODE (episodic-first methods): first-class, append-only
             if args.method in ("episodic", "ours_full"):
                 try:
-                    episodic.record(task["id"], q, resp, ev["em"] == 1.0)
+                    episodic.record(task["id"], q, resp, ev["em"] == 1.0,
+                                    signature=(ev.get("_repair_signatures") or [""])[-1])
                 except Exception as exc:
                     sys.stderr.write("episode record error @%d: %s\n" % (idx, exc))
             # credit distilled bullets that were injected (deterministic presence/gold)
@@ -252,7 +354,8 @@ def main():
             # reflect -> distilled memory (promote_skills=False: consolidation is the gated induce step)
             if args.method in ("ours_mem", "ours_full", "ace"):
                 try:
-                    reflect.run(summary=env.summarize(task, resp, ev), promote_skills=False)
+                    reflect.run(summary=envs_pkg.render_evidence(
+                        envs_pkg.collect_evidence(env, task, resp, ev)), promote_skills=False)
                 except Exception as exc:
                     sys.stderr.write("reflect error @%d: %s\n" % (idx, exc))
 
@@ -267,13 +370,14 @@ def main():
             "n_bullets": len(bullets), "n_episodes": n_episodes,
             "max_uses": max((b.get("uses", 0) for b in bullets), default=0),
             "max_helpful": max((b.get("helpful", 0) for b in bullets), default=0),
-            "n_active_skills": n_active_skills,
+            "n_active_skills": n_active_skills, "repair_calls": meta["repair_calls"],
             "cum_cost_usd": round(cc, 6), "cum_output_tokens": ct,
         }
         sys.stderr.write(
-            "[%s seed%d %s] %2d em=%.0f f1=%.2f bul=%d ep=%d uses<=%d skills=%d cum=$%.4f\n"
+            "[%s seed%d %s] %2d em=%.0f f1=%.2f bul=%d ep=%d uses<=%d skills=%d rep=%d cum=$%.4f\n"
             % (args.method, args.seed, phase, idx + 1, ev["em"], ev["f1"],
-               row["n_bullets"], n_episodes, row["max_uses"], n_active_skills, cc))
+               row["n_bullets"], n_episodes, row["max_uses"], n_active_skills,
+               meta["repair_calls"], cc))
         return row
 
     def deploy_parallel(stream, phase):
@@ -294,22 +398,14 @@ def main():
         def one(pair):
             idx, task = pair
             mem_block, _ = inject(task)
-            try:
-                resp, cost = llm.call_claude(env.build_prompt(task, mem_block),
-                                             allowed_tools="Read", return_cost=True)
-            except Exception as exc:
-                resp, cost = "", 0.0
-                sys.stderr.write("target error @%d: %s\n" % (idx, exc))
-            try:
-                ev = env.score(task, resp)
-            except Exception as exc:                     # never let one task kill the fan-out
-                sys.stderr.write("score error @%d: %s\n" % (idx, exc))
-                ev = {"em": 0.0, "f1": 0.0, "sub_em": 0.0, "predicted_answer": ""}
-            sys.stderr.write("[%s seed%d %s] %3d/%d em=%.0f f1=%.2f $%.4f\n"
+            resp, ev, meta = solve(task, mem_block, want_cost=True)   # solve handles target/score errors
+            cost = meta["cost"]
+            sys.stderr.write("[%s seed%d %s] %3d/%d em=%.0f f1=%.2f rep=%d $%.4f\n"
                              % (args.method, args.seed, phase, idx + 1, len(stream),
-                                ev["em"], ev["f1"], cost))
+                                ev["em"], ev["f1"], meta["repair_calls"], cost))
             return {"idx": idx, "id": task["id"], "em": ev["em"], "f1": ev["f1"],
-                    "sub_em": ev["sub_em"], "pred": ev["predicted_answer"][:80], "_cost": cost}
+                    "sub_em": ev["sub_em"], "pred": ev["predicted_answer"][:80],
+                    "repair_calls": meta["repair_calls"], "_cost": cost}
 
         partials = llm.pmap(one, list(enumerate(stream)), args.deploy_workers)
         out_rows, run = [], c0
@@ -320,6 +416,7 @@ def main():
                 "sub_em": p["sub_em"], "pred": p["pred"], "n_bullets": stat["n_bullets"],
                 "n_episodes": stat["n_episodes"], "max_uses": stat["max_uses"],
                 "max_helpful": stat["max_helpful"], "n_active_skills": stat["n_active_skills"],
+                "repair_calls": p["repair_calls"],
                 "cum_cost_usd": round(run, 6), "cum_output_tokens": 0,
             })
         return out_rows
@@ -359,13 +456,15 @@ def main():
             deltas = []
             if args.method in ("ours_mem", "ours_full", "ace"):
                 try:
-                    deltas = reflect.reflect_deltas(env.summarize(task, resp, ev))   # parallel (no lock)
+                    deltas = reflect.reflect_deltas(envs_pkg.render_evidence(
+                        envs_pkg.collect_evidence(env, task, resp, ev)))   # parallel (no lock)
                 except Exception as exc:
                     sys.stderr.write("reflect error: %s\n" % exc)
             with store.STORE_LOCK:                                                    # serialized + atomic
                 if args.method in ("episodic", "ours_full"):
                     try:
-                        episodic.record(task["id"], task["question"], resp, ev["em"] == 1.0)
+                        episodic.record(task["id"], task["question"], resp, ev["em"] == 1.0,
+                                        signature=(ev.get("_repair_signatures") or [""])[-1])
                     except Exception as exc:
                         sys.stderr.write("episode record error: %s\n" % exc)
                 if deltas:
@@ -383,24 +482,15 @@ def main():
             idx, task = pair
             mem_at_serve = len(store.load())                 # snapshot: memory visible when served
             mem_block, injected_ids = inject(task)           # live retrieval (eventually-consistent)
-            try:
-                resp, cost = llm.call_claude(env.build_prompt(task, mem_block),
-                                             allowed_tools="Read", return_cost=True)
-            except Exception as exc:
-                resp, cost = "", 0.0
-                sys.stderr.write("target error @%d: %s\n" % (idx, exc))
-            try:
-                ev = env.score(task, resp)
-            except Exception as exc:
-                sys.stderr.write("score error @%d: %s\n" % (idx, exc))
-                ev = {"em": 0.0, "f1": 0.0, "sub_em": 0.0, "predicted_answer": ""}
+            resp, ev, meta = solve(task, mem_block, want_cost=True)   # repair loop + robust errors
+            cost = meta["cost"]
             learn_futs.append(learn_ex.submit(learn_job, task, resp, ev, injected_ids))  # async learn
-            sys.stderr.write("[%s seed%d %s/serve] %3d/%d em=%.0f mem@serve=%d $%.4f\n"
+            sys.stderr.write("[%s seed%d %s/serve] %3d/%d em=%.0f mem@serve=%d rep=%d $%.4f\n"
                              % (args.method, args.seed, phase, idx + 1, len(stream),
-                                ev["em"], mem_at_serve, cost))
+                                ev["em"], mem_at_serve, meta["repair_calls"], cost))
             return {"idx": idx, "id": task["id"], "em": ev["em"], "f1": ev["f1"],
                     "sub_em": ev["sub_em"], "pred": ev["predicted_answer"][:80],
-                    "mem_at_serve": mem_at_serve, "_cost": cost}
+                    "mem_at_serve": mem_at_serve, "repair_calls": meta["repair_calls"], "_cost": cost}
 
         c0, _ = cum_cost()
         partials = llm.pmap(serve_one, list(enumerate(stream)), args.deploy_workers)
@@ -413,6 +503,7 @@ def main():
                 "idx": p["idx"], "phase": phase, "id": p["id"], "em": p["em"], "f1": p["f1"],
                 "sub_em": p["sub_em"], "pred": p["pred"], "n_bullets": p["mem_at_serve"],
                 "n_episodes": 0, "max_uses": 0, "max_helpful": 0, "n_active_skills": 0,
+                "repair_calls": p["repair_calls"],
                 "cum_cost_usd": round(run, 6), "cum_output_tokens": 0,
             })
         sys.stderr.write("[%s seed%d] SERVING acquire done: %d served, final store=%d bullets, "
