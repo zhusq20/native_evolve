@@ -162,6 +162,43 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-04  (session 8 — Phase 3 CROSS-REGIME: searchqa 2×2 mirrors SB → the lever-identity result)
+Ran the SAME 2×2 (memory × repair) on **searchqa (shared-procedure regime)**, prequential n=24 seed0,
+verify_n=12, to test whether the memory↔repair interaction is regime-dependent. It is — searchqa is the
+MIRROR of SB. searchqa spend ~$3 (Phase-3 cumulative **$16.14 / 524 calls**).
+
+| searchqa preqEM (n=24 seed0) | repair=0 | repair=1 |
+|---|---|---|
+| no_memory | 0.750 | 0.875 |
+| ours_full | **0.917** | 0.833 |
+
+Repair fired **1–2/24** (vs SB 13/32). **Memory effect (r0) = +0.167** (0.917 vs 0.750). ours_full
+**2nd-half EM = 1.000 in BOTH r0 and r1** (learns the shared format procedure, nails the back half) —
+the cleanest learning fingerprint. Gate REJECTED the format skill (val near-saturated, base 9–10/12,
+rescued≈broke) ⇒ ours_full's lift comes from the **distilled tier** (the "minimal answer span" bullet),
+NOT the gated skill — session-7's gate false-negative persists, now surfaced as *inconclusive* not silent.
+**HONEST caveat:** repair fires ~once on searchqa ⇒ the whole repair COLUMN is within haiku noise (±2
+tasks); ours_full(r1) 0.833 < no_memory(r1) 0.875 is a 1-task noise gap, NOT SB-style interference (no
+repair fires → nothing to interfere). Robust signal = the r0 column + the fire counts + the 2nd-half=1.0.
+
+**CROSS-REGIME SYNTHESIS — the answer to "works across benchmark natures":**
+| | SB (diverse) | searchqa (shared-proc) |
+|---|---|---|
+| repair effect | **+0.34** (13/32 fire) | ~0 (1–2/24 fire) |
+| memory effect (r0) | +0.22 | +0.167 |
+| **carried by** | **REPAIR** | **MEMORY** |
+
+**One apparatus, two mechanisms; WHICH one matters is set by whether failures are verify-VISIBLE.**
+Malformed/crashing/poison code (SB) → verify fires → repair fixes (gold-free). Semantically-wrong-but-
+well-formed output with a shared latent procedure (searchqa) → verify is blind → repair idle → the
+distilled memory internalizes the procedure. The memory↔repair **substitution conflict appears only where
+verify's blind spot is large (SB)**; in searchqa the blind spot is the whole task, so memory owns it
+uncontested (helps in both columns, no interference). This is the cross-benchmark thesis: the method is
+general because it carries BOTH levers, and each regime auto-draws on the one its failure-structure needs.
+**ROBUST @1 seed:** lever identity (repair→SB, memory→searchqa) + fire counts + 2nd-half learning.
+**NEEDS SEEDS:** exact magnitudes, SB interference (−0.09 ~1 SE), searchqa repair-column ordering (noise).
+Results: `results/_p3_sq_r0/`, `results/_p3_sq_r1/`.
+
 ### 2026-06-04  (session 8 — Phase 3 FIRST ONLINE RESULTS: SB repair×memory 2×2 make-or-break)
 First billed validation of the session-8 apparatus on real haiku. Smoke (searchqa n=4) + SB micro-check
 confirmed end-to-end wiring, then the SB make-or-break: a clean **2×2 (memory × repair)** ablation,
