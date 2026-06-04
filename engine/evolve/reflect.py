@@ -69,6 +69,20 @@ def summarize_transcript(path, max_chars=12000):
     return "\n\n".join(out)[:max_chars]
 
 
+def reflect_deltas(summary):
+    """The EXPENSIVE half of reflection: claude reads the session summary and proposes curation
+    deltas. Pure (no store write), so a serving deployment can run many reflections concurrently
+    and serialize only the cheap deterministic merge. Returns the list of delta dicts."""
+    if not (summary or "").strip():
+        return []
+    template = (config.PROMPTS_DIR / "reflector.md").read_text(encoding="utf-8")
+    raw = llm.call_claude(
+        template + "\n\n=== SESSION SUMMARY ===\n" + summary,
+        allowed_tools="Read",
+    )
+    return (llm.extract_json(raw) or {}).get("deltas", [])
+
+
 def run(transcript_path=None, summary=None, promote_skills=True):
     """Returns the number of memory changes applied.
 
@@ -77,16 +91,7 @@ def run(transcript_path=None, summary=None, promote_skills=True):
     """
     if summary is None:
         summary = summarize_transcript(transcript_path) if transcript_path else ""
-    if not (summary or "").strip():
-        return 0
-
-    template = (config.PROMPTS_DIR / "reflector.md").read_text(encoding="utf-8")
-    raw = llm.call_claude(
-        template + "\n\n=== SESSION SUMMARY ===\n" + summary,
-        allowed_tools="Read",
-    )
-    obj = llm.extract_json(raw) or {}
-    deltas = obj.get("deltas", [])
+    deltas = reflect_deltas(summary)
     n = curate.merge(deltas)
 
     if promote_skills:

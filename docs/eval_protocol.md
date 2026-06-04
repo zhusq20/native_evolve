@@ -51,6 +51,55 @@ partitions, giving robustness across random splits rather than one fixed split.
   to make that the *only* consolidation — cheaper and the cleanest single selection pass).
   Then ALL methods deploy on the frozen test split. Acquisition trace saved to `*_acquire.jsonl`.
 
+## Throughput & robustness
+The frozen **deploy** phase (held-out test, ~70% of all calls) is embarrassingly parallel — the
+store is frozen, every test task is independent. So all NO-WRITES work fans out concurrently;
+only online-learning phases stay sequential (the prequential dependency is real).
+- **`--max_concurrency`** (run.py, default 16, set up to ~64): target peak concurrent `claude`
+  requests across the launch. The runner derives `deploy_workers = max_concurrency // workers`
+  and passes it down; it prints the effective peak.
+- **What runs concurrently:** frozen test deploy (all methods); `no_memory`/`external_optimizer`
+  in prequential (they never write); the **consolidation gate** A/B on val (`verify.lift_over_base`);
+  the **external optimizer's train rollouts**. **What stays sequential:** acquisition for
+  `episodic/ours_mem/ours_full/ace` (each task's memory depends on the previous).
+- **Order-stable despite out-of-order completion:** parallel deploy collects each call's own cost,
+  then reconstructs `cum_cost` in task order from the up-front acquisition cost — so the curve is
+  deterministic. Ledger appends are mutex-guarded; SB code-exec uses a unique tempdir per task.
+- **Robust retries** (`llm.call_claude`): transient failures — non-zero exit, timeout, empty
+  stdout — retry with exponential backoff + jitter. Tunable via env `NATIVE_EVOLVE_MAX_RETRIES`
+  (default 5) and `NATIVE_EVOLVE_RETRY_BASE` seconds (default 2.0). A call that still fails after
+  all retries raises; the deploy worker catches it, scores it as a miss, and the fan-out continues.
+
+### Serving mode — parallelizing the LEARNING phase too (`--acquire_mode serving`)
+The "online learning is sequential" constraint is a property of the strict **measurement**, not of
+the system. A real serving deployment never blocks request N+1 on N's reflection — it serves
+concurrently against the live store and learns in the background. `--acquire_mode serving` runs the
+learning phase that way:
+- **Serve** path (user-facing): retrieve from the LIVE store + generate, fanned out at
+  `deploy_workers`. Each served task records `n_bullets` = memory visible **at serve time** (the
+  staleness signal).
+- **Learn** path (background): each served task enqueues an async job on a `learn_workers` pool.
+  The expensive reflect (claude) runs in parallel; only the cheap deterministic store write
+  (`curate.merge`/`credit`, `episodic.record`) is serialized under `store.STORE_LOCK` and written
+  atomically — so concurrent serve-time reads never tear and learners never lose updates.
+- **Drain barrier:** all background learning is awaited before FREEZE, so the frozen store is fully
+  committed. (`sequential` stays the default for the clean prequential curve.)
+
+Why it's measurement-safe for **frozen** mode: the headline depends only on the *final committed*
+store, and curation is near order-independent (episodic append + counter sums are commutative; only
+dedup tie-breaking varies), so serving acquisition ≈ sequential acquisition at the headline while
+running fully in parallel. For **prequential** mode, serving turns the curve into a realistic
+*serving curve* (accuracy vs memory-visible-at-serve and throughput, not vs strict index).
+
+Engine-level benefit: making `store` writes atomic + `STORE_LOCK`-guarded also hardens a REAL
+Claude Code deployment, where concurrent Stop-hook reflections would otherwise race on the store.
+Validated (no-claude): 30 concurrent `curate.merge` adds → 30 bullets (no lost updates), all lines
+valid JSON, 4 readers churning vs a writer → 0 torn reads.
+
+Validated (hotpotqa frozen, deploy_workers=8): 2 methods × (8 acquire + 24 deploy) in 84s wall,
+out-of-order completion, `cum_cost` monotonic and idx-ordered, acquisition cost folded into the
+first deploy row.
+
 ## Cost model (frozen)
 Acquisition cost (train rollouts/reflection + val gating, or external's offline training) is paid
 **up front** and shows in the first test row's `cum_cost_usd`; deployment is **1 call/task,
@@ -66,7 +115,10 @@ python3 eval/run.py --tasks "$SB" --env spreadsheetbench \
   --protocol frozen --train_n 80 --verify_n 40 --test_n 280 \
   --stratify_key instruction_type --induce_every 0 \
   --methods no_memory,episodic,ours_mem,ours_full,ace,external_optimizer \
-  --seeds 0,1,2 --workers 6 --outdir results/sb_frozen
+  --seeds 0,1,2 --workers 1 --max_concurrency 64 --outdir results/sb_frozen
+# workers=1 keeps runs sequential so each run's deploy gets the full 64-wide fan-out;
+# raise --workers to overlap the sequential ACQUISITION phases of different methods
+# (peak concurrency stays ~max_concurrency = workers x deploy_workers).
 
 # HotpotQA — family-structured, own split at the 20/10/70 ratio, stratified by type
 python3 eval/fetch.py --env hotpotqa --n 520 --out eval/data/hotpotqa_val.jsonl   # bigger pool

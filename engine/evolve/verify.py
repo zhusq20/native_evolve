@@ -58,14 +58,15 @@ def multi_arm(arms, tasks, env, allowed_tools="Read"):
     return {"counts": counts, "n": len(tasks), "rows": rows}
 
 
-def lift_over_base(skill_block, base_block_fn, tasks, env, allowed_tools="Read"):
+def lift_over_base(skill_block, base_block_fn, tasks, env, allowed_tools="Read", workers=1):
     """The explicit consolidation gate: does ADDING skill_block on top of the episodic+
     distilled BASE injection raise held-out accuracy? Consolidation must EARN its place by
     beating the episodic-first baseline (per the agentic-memory finding); otherwise the
     system degrades gracefully to base-only. Returns (base_pass, full_pass, n).
-    """
-    base_pass, full_pass, n = 0, 0, 0
-    for t in tasks:
+
+    A no-writes A/B over disjoint val tasks, so it fans out at `workers` concurrent requests
+    (the runner passes deploy_workers here too)."""
+    def one(t):
         b = base_block_fn(t) if callable(base_block_fn) else (base_block_fn or "")
         full = (skill_block + "\n\n" + b) if b else skill_block
         try:
@@ -76,7 +77,7 @@ def lift_over_base(skill_block, base_block_fn, tasks, env, allowed_tools="Read")
             rf = llm.call_claude(env.build_prompt(t, full), allowed_tools=allowed_tools)
         except Exception:
             rf = ""
-        base_pass += int(env.score(t, rb)["em"] == 1.0)
-        full_pass += int(env.score(t, rf)["em"] == 1.0)
-        n += 1
-    return base_pass, full_pass, n
+        return int(env.score(t, rb)["em"] == 1.0), int(env.score(t, rf)["em"] == 1.0)
+
+    results = llm.pmap(one, tasks, workers)
+    return sum(r[0] for r in results), sum(r[1] for r in results), len(results)

@@ -147,8 +147,39 @@ test) grounded in SkillOpt's train/val/test manifest. Full design: **`docs/eval_
 - **SB exact replication wired** (not yet run — needs budget sign-off; ~thousands of billed haiku
   calls): `--protocol frozen --train_n 80 --verify_n 40 --test_n 280 --stratify_key instruction_type
   --induce_every 0` over all 400 SB tasks = SkillOpt's 80/40/280, directly comparable to their
-  headline. **NEXT:** launch SB frozen run (decide seeds/methods/test-size for budget), then
-  HotpotQA frozen at the 20/10/70 ratio.
+  headline.
+
+**Throughput + robustness (same session, so the SB run is efficient):**
+- **Parallelism:** the frozen DEPLOY phase (held-out test, ~70% of calls) is embarrassingly
+  parallel (frozen store). `run.py --max_concurrency N` (default 16; set up to ~64) → the runner
+  fans out all NO-WRITES work at `N//workers` concurrent claude requests: frozen test deploy (all
+  methods), no_memory/external in prequential, the **consolidation gate A/B** (`verify.lift_over_base`,
+  `workers=`), and the **external optimizer's train rollouts** (`train_external(workers=)`).
+  Online acquisition stays sequential (prequential dependency). cum_cost is reconstructed in task
+  order from each call's own cost (deterministic despite out-of-order completion); ledger appends
+  mutex-guarded; SB code-exec already uses a per-task tempdir.
+- **Robust retries** (`llm.call_claude`): non-zero exit / timeout / empty stdout retried with
+  exponential backoff + jitter (env `NATIVE_EVOLVE_MAX_RETRIES`=5, `NATIVE_EVOLVE_RETRY_BASE`=2.0s);
+  still-failing call → scored a miss, fan-out continues. Optional `return_cost` for the parallel path.
+- Validated: hotpotqa frozen deploy_workers=8 (2 methods × (8 acquire + 24 deploy) in 84s wall,
+  out-of-order completion, cum_cost monotonic/idx-ordered); SB parallel gate + external rollouts +
+  concurrent code-exec smoke (ours_full SB EM 0.67). Files: `engine/evolve/{llm,verify}.py`,
+  `eval/{prequential,run,external_opt}.py`.
+- **Serving (async) mode** (`--acquire_mode serving`): parallelizes the LEARNING phase too, for the
+  real serving scenario. Serve requests CONCURRENTLY (deploy_workers) against the LIVE store while
+  reflection writes ASYNC in a background `learn_workers` pool; expensive reflect (claude) runs in
+  parallel, only the cheap deterministic store write is serialized (`store.STORE_LOCK`) + atomic;
+  all learning DRAINED before freeze. `store.save`/`save_skill_state` now atomic (tmp+os.replace);
+  `reflect.reflect_deltas` split out the no-write claude half. The "online learning is sequential"
+  limit is a MEASUREMENT artifact, not a system one — frozen headline depends only on the final
+  committed store (curation ≈ order-independent), so serving ≈ sequential at the headline but fully
+  parallel. Also hardens a REAL deployment (concurrent Stop-hook reflections no longer race).
+  Validated: 30 concurrent merges → 30 bullets / 0 lost updates / 0 torn reads; hotpotqa serving
+  smoke (12 served concurrently out-of-order, drained, then gated deploy). Files:
+  `engine/evolve/{store,reflect}.py`, `eval/{prequential,run}.py`.
+
+**NEXT:** launch SB frozen run with `--max_concurrency 64` (decide seeds/methods/test-size for
+budget), then HotpotQA frozen at the 20/10/70 ratio.
 
 ### 2026-06-04  (session 5 — dataset feasibility sweep for eval-scope expansion)
 Assessed 14 candidate benchmarks (Spreadsheet, OfficeQA, DocVQA, HotpotQA, IFBench, HoVer,

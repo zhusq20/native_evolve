@@ -19,7 +19,8 @@ CODE_DIR = pathlib.Path(__file__).resolve().parents[1]
 
 
 def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
-            protocol="prequential", test_n=0, verify_n=18, stratify_key="", induce_every=16):
+            protocol="prequential", test_n=0, verify_n=18, stratify_key="", induce_every=16,
+            deploy_workers=1, acquire_mode="sequential", learn_workers=4):
     home = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "home"
     home.mkdir(parents=True, exist_ok=True)
     out = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "tasks.jsonl"
@@ -31,6 +32,8 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
         "--seed", str(seed), "--protocol", protocol, "--train_n", str(train_n),
         "--verify_n", str(verify_n), "--test_n", str(test_n),
         "--stratify_key", stratify_key, "--induce_every", str(induce_every),
+        "--deploy_workers", str(deploy_workers),
+        "--acquire_mode", acquire_mode, "--learn_workers", str(learn_workers),
         "--home", str(home), "--out", str(out),
     ]
     subprocess.run(cmd, env=env, check=True)
@@ -67,9 +70,18 @@ def main():
     ap.add_argument("--induce_every", type=int, default=16,
                     help="ours_full: gated skill consolidation every K acquisition tasks (0=off).")
     ap.add_argument("--workers", type=int, default=1,
-                    help="parallel (method,seed) RUNS. Each run is internally sequential "
-                         "(prequential online learning); seeds/methods are independent so "
-                         "they parallelize safely. Cap to respect API rate limits.")
+                    help="parallel (method,seed) RUNS. Learning phases are internally sequential; "
+                         "seeds/methods are independent so they parallelize safely.")
+    ap.add_argument("--max_concurrency", type=int, default=16,
+                    help="target max concurrent claude requests across the whole launch (e.g. 64). "
+                         "Within a run the no-writes deploy phase fans out to "
+                         "max_concurrency//workers.")
+    ap.add_argument("--acquire_mode", choices=["sequential", "serving"], default="sequential",
+                    help="sequential: strict prequential learning. serving: serve concurrently "
+                         "against the live store + async background reflection (real-deployment "
+                         "model; parallelizes the learning phase too).")
+    ap.add_argument("--learn_workers", type=int, default=4,
+                    help="serving: background reflection worker pool size.")
     args = ap.parse_args()
 
     methods = [m.strip() for m in args.methods.split(",") if m.strip()]
@@ -79,9 +91,14 @@ def main():
     # results[method][seed] = list of per-task rows
     jobs = [(m, s) for m in methods for s in seeds]
     results = {m: {} for m in methods}
+    deploy_workers = max(1, args.max_concurrency // max(1, args.workers))
+    print("concurrency: workers=%d runs x deploy_workers=%d => peak ~%d concurrent claude requests"
+          % (args.workers, deploy_workers, args.workers * deploy_workers))
+
     def _call(m, s):
         return run_one(args.tasks, args.n, m, s, args.outdir, args.train_n, args.env,
-                       args.protocol, args.test_n, args.verify_n, args.stratify_key, args.induce_every)
+                       args.protocol, args.test_n, args.verify_n, args.stratify_key,
+                       args.induce_every, deploy_workers, args.acquire_mode, args.learn_workers)
     if args.workers <= 1:
         for m, s in jobs:
             results[m][s] = _call(m, s)

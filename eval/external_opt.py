@@ -15,30 +15,33 @@ import json
 from evolve import config, llm
 
 
-def train_external(train_tasks, env, rounds=1):
+def train_external(train_tasks, env, rounds=1, workers=1):
     """Run the target on train tasks, then synthesize one global SKILL.md.
 
     Returns the SKILL.md text (frozen skill injected at eval time).
     rounds>1 iterates: re-run with the current draft, re-synthesize (GEPA-like).
-    env provides build_prompt/score (env-agnostic).
+    env provides build_prompt/score (env-agnostic). The per-round rollouts are independent
+    (no online learning), so they fan out at `workers` concurrent requests.
     """
     skill_md = ""
     for _ in range(max(1, rounds)):
-        examples = []
-        for t in train_tasks:
-            block = skill_md and ("## Skill (current draft)\n" + skill_md + "\n\n")
+        block = skill_md and ("## Skill (current draft)\n" + skill_md + "\n\n")
+
+        def rollout(t):
             prompt = env.build_prompt(t, block or "")
             try:
                 resp = llm.call_claude(prompt, allowed_tools="Read")
             except Exception:
                 resp = ""
             ev = env.score(t, resp)
-            examples.append({
+            return {
                 "q": t["question"][:200],
                 "agent": ev.get("predicted_answer", "")[:120],
                 "correct": ev["em"] == 1.0,
                 "gold": ev.get("gold_answers", t.get("answers")),
-            })
+            }
+
+        examples = llm.pmap(rollout, train_tasks, workers)
         tmpl = (config.PROMPTS_DIR / "external_optimizer.md").read_text(encoding="utf-8")
         batch = "\n".join(
             "Q: %s\n  agent: %s\n  correct: %s\n  gold: %s"

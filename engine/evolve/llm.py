@@ -7,10 +7,19 @@ self-evolution loop from recursing, these sub-sessions:
 """
 import json
 import os
+import random
 import re
 import subprocess
+import sys
+import threading
+import time
 
 from . import config
+
+# Ledger appends are serialized: a run's parallel deploy phase fires many concurrent
+# call_claude() from worker threads, all writing the SAME per-run ledger file. (Cross-run
+# isolation is by separate ledger files, so this process-local lock is sufficient.)
+_LEDGER_LOCK = threading.Lock()
 
 
 def _run(cmd, env_extra=None, cwd=None, timeout=600):
@@ -30,7 +39,13 @@ def call_claude(
     cwd=None,
     setting_sources="user",
     timeout=600,
+    return_cost=False,
 ):
+    """Shell out to `claude -p` with robust retries. Returns the result string (or
+    (result, cost_usd) when return_cost=True). Retries transient failures — non-zero exit,
+    timeout, empty stdout — with exponential backoff + jitter (rate limits / overload /
+    flaky network are the common causes during a 64-wide deploy). Tunable via env:
+    NATIVE_EVOLVE_MAX_RETRIES (default 5), NATIVE_EVOLVE_RETRY_BASE seconds (default 2.0)."""
     cmd = [
         config.CLAUDE_BIN, "-p", prompt,
         "--output-format", "json",
@@ -43,23 +58,57 @@ def call_claude(
     if config.MODEL:
         cmd += ["--model", config.MODEL]
 
-    proc = _run(cmd, cwd=cwd, timeout=timeout)
-    if proc.returncode != 0:
-        raise RuntimeError("claude CLI failed: " + (proc.stderr or "")[:500])
+    max_retries = int(os.environ.get("NATIVE_EVOLVE_MAX_RETRIES", "5"))
+    base = float(os.environ.get("NATIVE_EVOLVE_RETRY_BASE", "2.0"))
+    last_err = "unknown"
+    for attempt in range(max_retries + 1):
+        try:
+            proc = _run(cmd, cwd=cwd, timeout=timeout)
+            if proc.returncode == 0:
+                out = (proc.stdout or "").strip()
+                if out:
+                    try:
+                        obj = json.loads(out)
+                        if isinstance(obj, dict) and "result" in obj:
+                            cost = float(obj.get("total_cost_usd") or 0.0)
+                            _log_ledger(obj)
+                            return (obj["result"], cost) if return_cost else obj["result"]
+                    except Exception:
+                        pass
+                    return (out, 0.0) if return_cost else out   # non-JSON but non-empty: rare
+                last_err = "empty stdout"
+            else:
+                last_err = (proc.stderr or "")[:300] or ("exit %d" % proc.returncode)
+        except subprocess.TimeoutExpired:
+            last_err = "timeout after %ss" % timeout
+        except Exception as exc:                                # noqa: BLE001
+            last_err = repr(exc)[:300]
+        if attempt < max_retries:
+            delay = base * (2 ** attempt) + random.uniform(0, base)
+            sys.stderr.write("[claude retry %d/%d in %.1fs] %s\n"
+                             % (attempt + 1, max_retries, delay, last_err[:140]))
+            time.sleep(delay)
+    raise RuntimeError("claude CLI failed after %d retries: %s" % (max_retries, last_err))
 
-    out = (proc.stdout or "").strip()
-    try:
-        obj = json.loads(out)
-        if isinstance(obj, dict) and "result" in obj:
-            _log_ledger(obj)
-            return obj["result"]
-    except Exception:
-        pass
-    return out
+
+def pmap(fn, items, workers):
+    """Apply fn to items, order-preserving. workers<=1 runs inline; else a bounded thread pool.
+    claude calls are subprocess/IO-bound so threads give real concurrency; the ledger append is
+    lock-guarded. Shared by the eval deploy phase, the consolidation gate, and external rollouts."""
+    items = list(items)
+    if workers <= 1 or len(items) <= 1:
+        return [fn(x) for x in items]
+    import concurrent.futures
+    results = [None] * len(items)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(fn, x): i for i, x in enumerate(items)}
+        for f in concurrent.futures.as_completed(futs):
+            results[futs[f]] = f.result()
+    return results
 
 
 def _log_ledger(obj):
-    """Append per-call cost/usage to NATIVE_EVOLVE_LEDGER (jsonl) when set.
+    """Append per-call cost/usage to NATIVE_EVOLVE_LEDGER (jsonl) when set, thread-safely.
 
     Captures EVERY claude call through this module — target, Reflector, gate — so
     the eval runner can compute true cumulative cost including self-evolution.
@@ -74,8 +123,10 @@ def _log_ledger(obj):
             "output_tokens": int(usage.get("output_tokens") or 0),
             "input_tokens": int(usage.get("input_tokens") or 0),
         }
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(rec) + "\n")
+        line = json.dumps(rec) + "\n"
+        with _LEDGER_LOCK:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line)
     except Exception:
         pass
 
