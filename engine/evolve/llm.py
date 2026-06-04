@@ -60,6 +60,10 @@ def call_claude(
 
     max_retries = int(os.environ.get("NATIVE_EVOLVE_MAX_RETRIES", "5"))
     base = float(os.environ.get("NATIVE_EVOLVE_RETRY_BASE", "2.0"))
+    # NATIVE_EVOLVE_RETRY_FIXED: if set, use a CONSTANT retry interval (seconds) instead of
+    # exponential backoff — e.g. 1000 retries x 10s to patiently ride out long rate-limit outages.
+    fixed = os.environ.get("NATIVE_EVOLVE_RETRY_FIXED")
+    fixed = float(fixed) if fixed else None
     last_err = "unknown"
     for attempt in range(max_retries + 1):
         try:
@@ -84,7 +88,10 @@ def call_claude(
         except Exception as exc:                                # noqa: BLE001
             last_err = repr(exc)[:300]
         if attempt < max_retries:
-            delay = base * (2 ** attempt) + random.uniform(0, base)
+            if fixed is not None:
+                delay = fixed
+            else:
+                delay = min(base * (2 ** min(attempt, 8)) + random.uniform(0, base), 60.0)
             sys.stderr.write("[claude retry %d/%d in %.1fs] %s\n"
                              % (attempt + 1, max_retries, delay, last_err[:140]))
             time.sleep(delay)
