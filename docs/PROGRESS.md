@@ -162,6 +162,48 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-04  (session 8 — Phase 3 FIRST ONLINE RESULTS: SB repair×memory 2×2 make-or-break)
+First billed validation of the session-8 apparatus on real haiku. Smoke (searchqa n=4) + SB micro-check
+confirmed end-to-end wiring, then the SB make-or-break: a clean **2×2 (memory × repair)** ablation,
+SpreadsheetBench prequential, n=32, seed 0, stratified by instruction_type, full apparatus (rolling gate
+on). Two parallel run.py calls (repair_turns 1 / 0). **Total Phase-3 spend $13.12 / 327 claude calls.**
+
+| preqEM (SB n=32 seed0) | repair=0 | repair=1 |
+|---|---|---|
+| no_memory | 0.469 | **0.812** |
+| ours_full | 0.688 | 0.719 |
+
+Marginal effects: **repair** = +0.343 on no_memory (0.469→0.812), +0.031 on ours_full; **memory** = +0.219
+at repair=0 (0.469→0.688), −0.093 at repair=1. Repair fired 13/32 (no_memory) vs 4/32 (ours_full). Gate
+REJECTED skills at both checkpoints in both runs (rescued≈broke → no false-positive; lift is from
+episodic+distilled, not the skill tier). bullets≈30–33.
+
+**Three findings:**
+1. **Trace-grounded reflection FIXED the memory tier on SB — session-7's question answered YES.**
+   ours_full(r0) 0.688 ≫ no_memory(r0) 0.469 (+0.22). Session-7 ours_full was 0.446 ≤ 0.454 (net-harmful)
+   with the trace-BLIND reflector that learned the inverse skill. With evidence-grounded reflection,
+   consolidation now HELPS on diverse SB ⇒ the inverse-skill poison was the culprit, NOT SB's diversity
+   (the Phase-0 hypothesis, confirmed on real haiku). [Protocol caveat: this is PREQUENTIAL/online, not
+   session-7's FROZEN reuse — two changes (protocol + reflection), so the within-run r0 column is the
+   clean comparison; the cross-session number is directional.]
+2. **Reference-free repair is the single biggest lever: +0.34 (0.469→0.812), gold-free, conditional.**
+   no_memory(r0)=0.469 reproduces session-7's 0.454 ⇒ the jump is purely repair, not a harness change.
+   Captures most of SkillOpt's execute-repair upside cheaply (only 13/32 fires).
+3. **Memory and repair are SUBSTITUTES, not complements (sub-additive).** Best cell = no_memory+repair
+   (0.812); memory+repair (0.719) is BELOW repair-alone. Both target the same failure class (malformed /
+   crashing / formula-poison code) — memory prevents some up front, repair fixes some after — so they
+   overlap; memory's residue (verify-passing-but-semantically-WRONG code) caps it and suppresses repair
+   (4 vs 13 fires). ⇒ on genuinely-diverse SB the general lever is REPAIR; the memory tier helps alone
+   but is dominated once repair is on.
+
+**Caveats:** n=32, 1 seed, SE≈0.09. Repair (+0.34, ~11 tasks) far beyond noise — SOLID. Memory-at-r0
+(+0.22, ~7 tasks) likely real (>2 SE). The interference (−0.09, ~3 tasks) ~1 SE — SUGGESTIVE, needs seeds.
+**NEXT (needs budget):** ≥3 seeds on the SB 2×2 to firm up the interference; then the same 2×2 on searchqa
+(shared-proc — expect memory & repair to stack differently) + HotpotQA (families); then frozen-reuse
+headline. Smoke validations: searchqa n=4 reflection produced the RIGHT grounded heuristic ("emit minimal
+answer span, match granularity" — not the inverse poison); SB repair fires correctly (fixes crash/poison,
+stays silent on well-formed-but-wrong). Results: `results/_p3_sb_r0/`, `results/_p3_sb_r1/`.
+
 ### 2026-06-04  (session 8 — cross-benchmark apparatus redesign: feedback taxonomy, repair loop, trace-grounded reflection)
 User constraint: the涨点 plan must work for benchmarks of DIFFERENT NATURES, not just SB. Reframed
 session-7's SB-specific fixes into a general principle and built it as Phases 0–2. **All code is
