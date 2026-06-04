@@ -18,14 +18,18 @@ import pathlib
 COLORS = {
     "no_memory": "#888888",
     "ours_full": "#1f77b4",
+    "ours_mem": "#17becf",
+    "episodic": "#2ca02c",
     "ace": "#ff7f0e",
     "external_optimizer": "#9467bd",
     "skillopt": "#9467bd",
 }
-ORDER = ["no_memory", "external_optimizer", "skillopt", "ace", "ours_full"]
+ORDER = ["no_memory", "external_optimizer", "skillopt", "ace", "episodic", "ours_mem", "ours_full"]
 LABEL = {
     "no_memory": "no-memory (lower bound)",
-    "ours_full": "ours (two-tier + gate)",
+    "ours_full": "ours-full (episodic+distilled+gated skill)",
+    "ours_mem": "ours-mem (distilled retrieval)",
+    "episodic": "episodic (raw exemplars)",
     "ace": "ACE (single-tier playbook)",
     "external_optimizer": "external optimizer (offline)",
     "skillopt": "SkillOpt (offline)",
@@ -166,7 +170,8 @@ def chart(data, xkey, title, xlabel, out, ymax=1.0):
 
 
 SHORT = {"no_memory": "no-mem", "external_optimizer": "external", "ace": "ACE",
-         "skillopt": "SkillOpt", "ours_full": "ours"}
+         "skillopt": "SkillOpt", "ours_full": "ours-full", "ours_mem": "ours-mem",
+         "episodic": "episodic"}
 
 
 def bars(data, title, out):

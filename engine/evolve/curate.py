@@ -88,3 +88,36 @@ def merge(deltas):
     if changed:
         store.save(items)
     return changed
+
+
+def credit(ids, success):
+    """Deterministically credit the bullets that were in-context for an evaluated task.
+
+    Presence-based, gold-grounded attribution: every injected bullet gets uses+1; on a
+    PASSING task it also gets helpful+1. A failure does NOT add harmful — a bullet being
+    present when an (often unrelated) task fails is not evidence it misled, and a false
+    harmful would wrongly deprecate it and permanently block the gate (harmful==0). This
+    is the deterministic signal that lets uses/helpful climb so the promotion gate can
+    fire; like the rest of curation it NEVER lets an LLM rewrite the store. Proving
+    causal (not merely correlational) lift is the job of the counterfactual gate.
+
+    Returns the number of bullets credited.
+    """
+    if not ids:
+        return 0
+    items = store.load()
+    by_id = {b["id"]: b for b in items}
+    today = datetime.date.today().isoformat()
+    changed = 0
+    for i in ids:
+        b = by_id.get(i)
+        if b is None:
+            continue
+        b["uses"] = b.get("uses", 0) + 1
+        b["last_used"] = today
+        if success:
+            b["helpful"] = b.get("helpful", 0) + 1
+        changed += 1
+    if changed:
+        store.save(items)
+    return changed

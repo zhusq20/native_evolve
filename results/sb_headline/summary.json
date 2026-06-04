@@ -1,0 +1,50 @@
+{
+  "no_memory": {
+    "final_preq_em": 0.4167,
+    "final_preq_f1": 0.4167,
+    "first_half_em": 0.4167,
+    "second_half_em": 0.4167,
+    "total_cost_usd": 1.8156,
+    "final_bullets": 0.0
+  },
+  "episodic": {
+    "final_preq_em": 0.5625,
+    "final_preq_f1": 0.5625,
+    "first_half_em": 0.5,
+    "second_half_em": 0.625,
+    "total_cost_usd": 1.6134,
+    "final_bullets": 0.0
+  },
+  "ours_mem": {
+    "final_preq_em": 0.375,
+    "final_preq_f1": 0.375,
+    "first_half_em": 0.4583,
+    "second_half_em": 0.2917,
+    "total_cost_usd": 3.1969,
+    "final_bullets": 115.0
+  },
+  "ace": {
+    "final_preq_em": 0.3958,
+    "final_preq_f1": 0.3958,
+    "first_half_em": 0.4167,
+    "second_half_em": 0.375,
+    "total_cost_usd": 3.6313,
+    "final_bullets": 101.0
+  },
+  "external_optimizer": {
+    "final_preq_em": 0.4167,
+    "final_preq_f1": 0.4167,
+    "first_half_em": 0.375,
+    "second_half_em": 0.4583,
+    "total_cost_usd": 2.2,
+    "final_bullets": 0.0
+  },
+  "ours_full": {
+    "final_preq_em": 0.4375,
+    "final_preq_f1": 0.4375,
+    "first_half_em": 0.4583,
+    "second_half_em": 0.4167,
+    "total_cost_usd": 5.271,
+    "final_bullets": 121.0
+  }
+}

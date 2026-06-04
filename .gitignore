@@ -10,6 +10,9 @@ eval/data/spreadsheet/
 # We KEEP the results of record: tasks.jsonl, curve.csv, summary.json, *.svg.
 results/*/runs/*/home/
 
+# Scratch / de-risking runs (pilots, smokes, A/B diagnostics) — not results of record.
+results/_*/
+
 # Promoted skills are a real engine/skills dir; .claude/skills is a generated symlink.
 engine/.claude/skills
 

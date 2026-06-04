@@ -1,0 +1,72 @@
+"""Episodic memory: raw task -> solution -> outcome traces, retrieved as few-shot exemplars.
+
+Motivated by the agentic-memory finding that LLM CONSOLIDATION (rewriting episodes into
+abstract lessons/skills) is often faulty and can fall below the no-memory baseline, while an
+episodic-only control that simply RETAINS raw trajectories stays competitive. So we treat raw
+episodes as first-class evidence: append-only (never rewritten/overwritten), and retrieve a
+similar PAST SUCCESS as a worked example. For code-gen this is the most direct, lowest-risk
+form of memory — no lossy consolidation step between the experience and its use.
+"""
+import json
+import re
+
+from . import config
+
+
+def _path():
+    return config.MEMORY_DIR / "episodes.jsonl"
+
+
+def _tokens(text):
+    return set(re.findall(r"\w+", (text or "").lower()))
+
+
+def record(task_id, question, solution, passed):
+    """Append one raw episode. Non-destructive by construction (append-only)."""
+    config.MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+    rec = {"id": task_id, "question": question or "", "solution": solution or "",
+           "passed": bool(passed)}
+    with open(_path(), "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def load():
+    p = _path()
+    if not p.exists():
+        return []
+    out = []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except Exception:
+            pass
+    return out
+
+
+def retrieve(query, k=2, successes_only=True):
+    """Top-k past episodes most lexically similar to `query` (prefer successes)."""
+    eps = load()
+    if successes_only:
+        eps = [e for e in eps if e.get("passed")]
+    if not eps:
+        return []
+    q = _tokens(query)
+    scored = sorted(eps, key=lambda e: len(_tokens(e.get("question", "")) & q), reverse=True)
+    return [e for e in scored if len(_tokens(e.get("question", "")) & q) > 0][:k]
+
+
+def exemplar_block(query, k=2, max_solution_chars=1100, max_q_chars=400):
+    """Inject up to k similar past SUCCESSES as worked examples (empty if none)."""
+    eps = retrieve(query, k)
+    if not eps:
+        return ""
+    parts = []
+    for e in eps:
+        sol = (e.get("solution", "") or "")[:max_solution_chars]
+        parts.append("### A similar task you previously solved CORRECTLY\nTask: %s\nYour working solution:\n%s"
+                     % ((e.get("question", "") or "")[:max_q_chars], sol))
+    return ("Worked examples retrieved from your past successes — adapt the approach to the "
+            "current task (do not copy blindly):\n\n" + "\n\n".join(parts))

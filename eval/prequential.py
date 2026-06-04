@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """One prequential run: stream tasks, test-then-train, log per task.
 
-Method:
-  no_memory  -> target only; no injection, no learning (lower bound)
-  ours_full  -> inject retrieved memory before test; reflect/curate/promote after
+Methods (episodic-first memory; consolidation is non-destructive + explicitly gated):
+  no_memory   -> target only; no injection, no learning (lower bound)
+  episodic    -> retrieve raw past-success exemplars (episodic-only control); no consolidation
+  ours_mem    -> distilled itemized memory: reflect/curate + top-k retrieval + presence/gold credit
+  ours_full   -> episodic + distilled + GATED skills (induce, activate only if they beat the
+                 episodic+distilled baseline on held-out tasks; source memory never drained)
+  ace         -> single-tier: inject the FULL playbook every task; reflect; no promotion
+  external_optimizer -> offline-train one frozen SKILL.md on a disjoint split (cost paid up front)
 
 Isolation: each run gets its own NATIVE_EVOLVE_HOME (fresh memory store + prompts),
 so learning is clean and reproducible and never touches the deployment store.
@@ -48,11 +53,16 @@ def main():
     ap.add_argument("--env", default="searchqa")
     ap.add_argument("--n", type=int, default=10)
     ap.add_argument("--method",
-                    choices=["no_memory", "ours_full", "ace", "external_optimizer"],
+                    choices=["no_memory", "episodic", "ours_mem", "ours_full",
+                             "ace", "external_optimizer"],
                     required=True)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--train_n", type=int, default=12,
                     help="external_optimizer: # disjoint training tasks (after the eval slice)")
+    ap.add_argument("--induce_every", type=int, default=16,
+                    help="ours_full: run gated skill consolidation every K tasks (0=off)")
+    ap.add_argument("--verify_n", type=int, default=6,
+                    help="ours_full: # held-out tasks for the counterfactual consolidation gate")
     ap.add_argument("--home", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -67,7 +77,7 @@ def main():
     prepare_home(args.home)
     sys.path.insert(0, str(ENGINE_DIR))
 
-    from evolve import retrieve, reflect, store  # noqa: E402
+    from evolve import retrieve, reflect, store, curate, episodic, induce, verify  # noqa: E402
     sys.path.insert(0, str(pathlib.Path(__file__).parent))
     import external_opt  # noqa: E402
     import envs as envs_pkg  # noqa: E402
@@ -79,6 +89,8 @@ def main():
     rng.shuffle(all_tasks)
     tasks = all_tasks[: args.n]                          # eval stream (same across methods)
     train_tasks = all_tasks[args.n: args.n + args.train_n]  # disjoint, for external optimizer
+    vstart = args.n + args.train_n
+    verify_tasks = all_tasks[vstart: vstart + args.verify_n]  # disjoint, for the consolidation gate
 
     # external_optimizer: pay the offline training cost up front, then freeze one skill.
     frozen_skill = ""
@@ -101,6 +113,28 @@ def main():
             t += rec.get("output_tokens", 0)
         return c, t
 
+    def base_block(t):
+        """Episodic + distilled injection — the episodic-first baseline the gate must beat."""
+        epi = episodic.exemplar_block(t["question"])
+        dis, _ = retrieve.select_and_block(t["question"])
+        return "\n\n".join(x for x in (epi, dis) if x)
+
+    def consolidate(idx):
+        """Non-destructive, GATED consolidation: induce skills from memory, activate them ONLY
+        if they lift held-out accuracy over the episodic+distilled baseline; else keep them as
+        candidates so ours_full degrades gracefully to episodic+distilled (never below)."""
+        cands = induce.induce(focus_failures=True)
+        if not cands:
+            return
+        skill_block = "## Candidate skills (apply if relevant):\n\n" + "\n\n".join(c["md"] for c in cands)
+        bp, fp, vn = verify.lift_over_base(skill_block, base_block, verify_tasks, env)
+        activate = vn > 0 and fp > bp
+        for c in cands:
+            induce.write_skill(c, status=("active" if activate else "candidate"))
+        sys.stderr.write("[consolidate @%d] gate: base %d -> +skills %d (of %d) => %s\n"
+                         % (idx, bp, fp, vn,
+                            ("ACTIVATE %d skills" % len(cands)) if activate else "REJECT (degrade)"))
+
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -108,8 +142,16 @@ def main():
         q = task["question"]
 
         # --- inject context per method ---
-        if args.method == "ours_full":
-            mem_block = retrieve.context_block(q)               # two-tier: top-k retrieval
+        injected_ids = []
+        if args.method == "episodic":
+            mem_block = episodic.exemplar_block(q)              # raw past-success exemplars (episodic-only)
+        elif args.method == "ours_mem":
+            mem_block, injected_ids = retrieve.select_and_block(q)  # distilled top-k memory only
+        elif args.method == "ours_full":
+            epi = episodic.exemplar_block(q)                    # episodic exemplars
+            dis, injected_ids = retrieve.select_and_block(q)    # distilled top-k memory
+            skl = retrieve.skills_block(q)                      # gated, verified skills (often none)
+            mem_block = "\n\n".join(x for x in (epi, dis, skl) if x)
         elif args.method == "ace":
             mem_block = retrieve.full_playbook_block()          # single-tier: full playbook
         elif args.method == "external_optimizer":
@@ -125,25 +167,56 @@ def main():
 
         ev = env.score(task, resp)
 
-        # --- train step (online methods only): reflect on the outcome -> memory ---
-        if args.method in ("ours_full", "ace"):
+        # --- record the RAW EPISODE (episodic-first methods): first-class, append-only ---
+        if args.method in ("episodic", "ours_full"):
             try:
-                reflect.run(summary=env.summarize(task, resp, ev),
-                            promote_skills=(args.method == "ours_full"))
+                episodic.record(task["id"], q, resp, ev["em"] == 1.0)
+            except Exception as exc:
+                sys.stderr.write("episode record error @%d: %s\n" % (idx, exc))
+
+        # --- credit distilled bullets that were injected (deterministic presence/gold) ---
+        if args.method in ("ours_mem", "ours_full") and injected_ids:
+            try:
+                curate.credit(injected_ids, ev["em"] == 1.0)
+            except Exception as exc:
+                sys.stderr.write("credit error @%d: %s\n" % (idx, exc))
+
+        # --- reflect -> distilled memory (methods that maintain a distilled store) ---
+        # promote_skills=False: consolidation is now the NON-DESTRUCTIVE, GATED induce step
+        # (consolidate()), never the old per-bullet promote that drained the memory tier.
+        if args.method in ("ours_mem", "ours_full", "ace"):
+            try:
+                reflect.run(summary=env.summarize(task, resp, ev), promote_skills=False)
             except Exception as exc:
                 sys.stderr.write("reflect error @%d: %s\n" % (idx, exc))
 
+        # --- gated consolidation (ours_full): induce skills, activate only if they beat the
+        #     episodic+distilled baseline on held-out tasks; else degrade gracefully ---
+        if args.method == "ours_full" and args.induce_every > 0 and (idx + 1) % args.induce_every == 0:
+            try:
+                consolidate(idx)
+            except Exception as exc:
+                sys.stderr.write("consolidate error @%d: %s\n" % (idx, exc))
+
         cc, ct = cum_cost()
+        bullets = store.load()
+        skill_state = store.load_skill_state()
+        n_active_skills = sum(1 for v in skill_state.values() if v.get("status") == "active")
+        n_episodes = len(episodic.load()) if args.method in ("episodic", "ours_full") else 0
         rows.append({
             "idx": idx, "id": task["id"], "em": ev["em"], "f1": ev["f1"],
             "sub_em": ev["sub_em"], "pred": ev["predicted_answer"][:80],
-            "n_bullets": len(store.load()),
+            "n_bullets": len(bullets), "n_episodes": n_episodes,
+            "max_uses": max((b.get("uses", 0) for b in bullets), default=0),
+            "max_helpful": max((b.get("helpful", 0) for b in bullets), default=0),
+            "n_active_skills": n_active_skills,
             "cum_cost_usd": round(cc, 6), "cum_output_tokens": ct,
         })
         sys.stderr.write(
-            "[%s seed%d] %2d/%d em=%.0f f1=%.2f bullets=%d cum=$%.4f\n"
+            "[%s seed%d] %2d/%d em=%.0f f1=%.2f bul=%d ep=%d uses<=%d skills=%d cum=$%.4f\n"
             % (args.method, args.seed, idx + 1, len(tasks), ev["em"], ev["f1"],
-               rows[-1]["n_bullets"], cc)
+               rows[-1]["n_bullets"], n_episodes, rows[-1]["max_uses"],
+               rows[-1]["n_active_skills"], cc)
         )
 
     with out.open("w", encoding="utf-8") as f:
