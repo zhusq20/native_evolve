@@ -26,7 +26,8 @@ acc-vs-cost is fair. Baselines, all on the same `claude` CLI + same target model
 - Engine: store / retrieve / curate(deterministic) / reflect(claude) / promote+gate(claude). ✓
 - Deployment: Claude Code hooks (UserPromptSubmit→inject memory, Stop→reflect, recursion-guarded). ✓
 - Eval harness: prequential runner, 4 baselines, `--workers` parallel across runs, SVG plots. ✓
-- Envs: searchqa ✓, spreadsheetbench ✓ (codegen+exec+official cell-compare), gsm8k ✓ (deprecated: too easy).
+- Envs: searchqa ✓, spreadsheetbench ✓ (codegen+exec+official cell-compare), hotpotqa ✓
+  (distractor multi-hop QA, official EM/F1, bridge/comparison families), gsm8k ✓ (deprecated: too easy).
 - Skills visible in `./skills/` with `.claude/skills` symlink. ✓
 - Parallelism: across (method,seed) runs only; a single online run is inherently sequential
   (prequential dependency). Confirmed isolated (per-run home/ledger).
@@ -121,6 +122,47 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-04  (session 5 — dataset feasibility sweep for eval-scope expansion)
+Assessed 14 candidate benchmarks (Spreadsheet, OfficeQA, DocVQA, HotpotQA, IFBench, HoVer,
+PUPA, AIME-2025, LiveBench-Math, ARC-AGI, WebShop, ScienceWorld, AppWorld, ALFWorld) for
+fit with the single-call `claude -p` harness. Full writeup: **`docs/dataset_feasibility.md`**.
+- **Decisive filter = harness constraint #1** (one headless `claude -p` call/task, no agent
+  loop / tools / vision). It cleanly partitions the field.
+- **ADOPT (text + programmatic scoring + real family structure):** ① **HotpotQA-distractor**
+  (searchqa-clone, bridge/comparison families → cleanest in-harness C1 skill-formation test,
+  low effort); ② **IFBench** (deterministic reference-free verifiers — a scoring modality we
+  lack; built-in OOD constraint-generalization stressor); ③ **HoVer-oracle** (num_hops 2/3/4
+  family axis → compositional frozen-deployment split). These FILL the project's #1 gap (a
+  family-structured benchmark; searchqa/SB/MATH have none).
+- **Adopt-with-work / optional:** DocVQA-OCR (ANLS fuzzy-scoring + OCR robustness axis),
+  LiveBench-Math (contamination-freshness for C2; overlaps MATH).
+- **Defer:** Spreadsheet-912 (volume only, same diverse regime), PUPA (LLM-judge + live API),
+  WebShop (BM25-infra heavy, strips its own task).
+- **Reject — needs a new multi-turn agent↔env harness (separate initiative):** OfficeQA,
+  ScienceWorld, AppWorld, ALFWorld, native WebShop. Priority if ever built: AppWorld → ALFWorld
+  → ScienceWorld.
+- **Reject — mechanically fit but poor thesis fit:** AIME-2025 (n=30, haiku floors w/o thinking,
+  no shared procedure), ARC-AGI (anti-reuse by design, floors).
+- **NEXT:** implement HotpotQA then IFBench env files (both ~½ day); 24-task haiku dry-run to
+  confirm mid-range before committing seeds; for any adopted env, plan a one-time online warmup
+  (nltk/spacy/pyarrow + data fetch) before the offline loop.
+
+**HotpotQA env IMPLEMENTED + dry-run done (this session).** New files: `eval/envs/hotpotqa.py`
+(distractor-only, searchqa-shaped, carries `type`/`level`), `eval/scoring_hotpotqa.py` (official
+HotpotQA EM/F1 vendored, yes/no-aware), `eval/data/hotpotqa_val.jsonl` (150 tasks, 122 bridge /
+28 comparison, all `hard`; fetch via `eval/fetch.py --env hotpotqa --n N` off the HF
+datasets-server). Scorer unit-checked; 1-task + 24-task haiku smokes pass; plot.py works.
+**24-task dry-run (seed 0, n=24):**
+| method | EM | F1 | bridge EM | comparison EM | 1st→2nd half | cost |
+|---|---|---|---|---|---|---|
+| no_memory | 0.667 | 0.787 | 0.632 (n=19) | 0.800 (n=5) | 0.750→0.583 | $0.41 |
+| episodic | 0.667 | 0.816 | 0.579 (n=19) | 1.000 (n=5) | 0.667→0.667 | $0.39 |
+→ **Mid-range CONFIRMED, no floor/ceiling** (overall 0.667, like searchqa's 0.708). The flagged
+caveat HOLDS: **comparison (yes/no) is near-ceiling/guessable (0.8–1.0, n=5)**; **bridge is the
+family with real headroom (~0.60)** and is the majority — so analysis should report per-`type` EM
+(or weight bridge), not just flat EM. episodic≈no_memory at n=24 is expected noise (SE≈0.1). Env
+ready for the full multi-method × ≥3-seed run; figures in `results/hotpot_dryrun/`.
+
 ### 2026-06-04  (session 4 — memory→skill investigation, then episodic-first refactor)
 The big one. Started out to "fire the promotion gate" (session-3 NEXT #1); ended up reworking
 what a skill IS and which memory form actually transfers. Total spend this session ≈ **$27.5**
