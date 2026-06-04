@@ -18,7 +18,8 @@ import sys
 CODE_DIR = pathlib.Path(__file__).resolve().parents[1]
 
 
-def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa"):
+def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
+            protocol="prequential", test_n=0, verify_n=18, stratify_key="", induce_every=16):
     home = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "home"
     home.mkdir(parents=True, exist_ok=True)
     out = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "tasks.jsonl"
@@ -27,7 +28,9 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa"):
     cmd = [
         sys.executable, str(CODE_DIR / "eval" / "prequential.py"),
         "--tasks", tasks, "--env", env_name, "--n", str(n), "--method", method,
-        "--seed", str(seed), "--train_n", str(train_n),
+        "--seed", str(seed), "--protocol", protocol, "--train_n", str(train_n),
+        "--verify_n", str(verify_n), "--test_n", str(test_n),
+        "--stratify_key", stratify_key, "--induce_every", str(induce_every),
         "--home", str(home), "--out", str(out),
     ]
     subprocess.run(cmd, env=env, check=True)
@@ -50,8 +53,19 @@ def main():
     ap.add_argument("--methods", default="no_memory,ours_full")
     ap.add_argument("--seeds", default="0")
     ap.add_argument("--outdir", default="results/smoke")
+    ap.add_argument("--protocol", choices=["prequential", "frozen"], default="prequential",
+                    help="prequential: online learning curve. frozen: acquire->gate->FREEZE->"
+                         "held-out test headline (SkillOpt-style; measures reuse).")
     ap.add_argument("--train_n", type=int, default=12,
-                    help="external_optimizer: # disjoint offline training tasks")
+                    help="train/rollout split size (frozen acquisition + external offline-train). SB=80.")
+    ap.add_argument("--verify_n", type=int, default=18,
+                    help="val/selection split size for the skill-edit gate. SkillOpt ~18-40; SB=40.")
+    ap.add_argument("--test_n", type=int, default=0,
+                    help="frozen: held-out test size (0=all remaining after train+val). SB=280.")
+    ap.add_argument("--stratify_key", default="",
+                    help="stratify splits on this task field (instruction_type for SB, type for hotpotqa).")
+    ap.add_argument("--induce_every", type=int, default=16,
+                    help="ours_full: gated skill consolidation every K acquisition tasks (0=off).")
     ap.add_argument("--workers", type=int, default=1,
                     help="parallel (method,seed) RUNS. Each run is internally sequential "
                          "(prequential online learning); seeds/methods are independent so "
@@ -65,14 +79,16 @@ def main():
     # results[method][seed] = list of per-task rows
     jobs = [(m, s) for m in methods for s in seeds]
     results = {m: {} for m in methods}
+    def _call(m, s):
+        return run_one(args.tasks, args.n, m, s, args.outdir, args.train_n, args.env,
+                       args.protocol, args.test_n, args.verify_n, args.stratify_key, args.induce_every)
     if args.workers <= 1:
         for m, s in jobs:
-            results[m][s] = run_one(args.tasks, args.n, m, s, args.outdir, args.train_n, args.env)
+            results[m][s] = _call(m, s)
     else:
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as ex:
-            fut = {ex.submit(run_one, args.tasks, args.n, m, s, args.outdir, args.train_n, args.env): (m, s)
-                   for m, s in jobs}
+            fut = {ex.submit(_call, m, s): (m, s) for m, s in jobs}
             for f in concurrent.futures.as_completed(fut):
                 m, s = fut[f]
                 results[m][s] = f.result()
@@ -116,10 +132,17 @@ def main():
             }
 
     (pathlib.Path(args.outdir) / "summary.json").write_text(json.dumps(summary, indent=2))
+    headline_n = min((len(results[m][s]) for m in methods for s in seeds), default=0)
     print("\n==================== PHASE-0 SUMMARY ====================")
-    print("tasks=%d  methods=%s  seeds=%s" % (args.n, methods, seeds))
+    if args.protocol == "frozen":
+        print("protocol=frozen  train=%d val=%d test=%d(headline)  methods=%s  seeds=%s"
+              % (args.train_n, args.verify_n, headline_n, methods, seeds))
+        emlabel = "testEM"
+    else:
+        print("protocol=prequential  tasks=%d  methods=%s  seeds=%s" % (args.n, methods, seeds))
+        emlabel = "preqEM"
     print("%-12s %8s %8s %9s %9s %10s %8s"
-          % ("method", "preqEM", "preqF1", "1stHalf", "2ndHalf", "cost_usd", "bullets"))
+          % ("method", emlabel, "F1", "1stHalf", "2ndHalf", "cost_usd", "bullets"))
     for m in methods:
         s = summary[m]
         print("%-12s %8.3f %8.3f %9.3f %9.3f %10.4f %8.1f"

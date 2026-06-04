@@ -122,6 +122,34 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-04  (session 6 — SkillOpt-style frozen-deployment protocol + SB exact-split replication)
+Implemented the **frozen-deployment protocol** (the carried NEXT #1: acquisition→FROZEN→held-out
+test) grounded in SkillOpt's train/val/test manifest. Full design: **`docs/eval_protocol.md`**.
+- **Two protocols in `prequential.py`** via `--protocol`: `prequential` (online learning curve,
+  default, unchanged) and `frozen` (acquire on train → gate skill edits on val → FREEZE → headline
+  on held-out test → measures REUSE, not local adaptation). Per-task work factored into
+  `process(task,idx,learn,phase)`; `acquire(stream,phase)` is the shared online loop; each row
+  carries a `phase` field (`eval`|`acquire`|`test`); acquisition trace saved to `*_acquire.jsonl`.
+- **SkillOpt three-role split** (train=rollout evidence / val=accept-reject skill-edit gate /
+  test=frozen headline), manifest ratio ~20/10/70. New `stratified_split(all_tasks, sizes, seed,
+  key)`: exact sizes, optional family-stratification (SB `instruction_type`, HotpotQA `type`);
+  `key=""` is byte-identical to the old slicing (existing prequential results reproduce). Cost
+  model: acquisition paid up front (folds into the first test row's `cum_cost`), deployment is
+  1 call/task identical across methods → **C2 "lower total cost" = acquisition cost**.
+- **Under-powered gate fixed:** `--verify_n` default **6 → 18** (6 haiku tasks, SE≈0.2, can't
+  resolve a real skill lift; session-4's "gate rubber-stamps" was partly low power; SkillOpt val
+  18–40). `run.py` threads `--protocol/--test_n/--verify_n/--stratify_key/--induce_every`.
+- **Validated** (no-claude unit tests + a real frozen SB smoke, 4/2/4 stratified, scratch
+  `results/_sb_frozen_smoke/`): splitter exact 80/40/280 with strata preserved (~0.69/0.31),
+  disjoint, reproducible, back-compatible; end-to-end acquire→freeze→test works for no_memory /
+  episodic / ours_full; **gate induced 2 skills, rejected on val → candidate (graceful degrade)**;
+  acquisition cost correctly folded into deployment cost. (Tiny-n EMs are noise — mechanism check.)
+- **SB exact replication wired** (not yet run — needs budget sign-off; ~thousands of billed haiku
+  calls): `--protocol frozen --train_n 80 --verify_n 40 --test_n 280 --stratify_key instruction_type
+  --induce_every 0` over all 400 SB tasks = SkillOpt's 80/40/280, directly comparable to their
+  headline. **NEXT:** launch SB frozen run (decide seeds/methods/test-size for budget), then
+  HotpotQA frozen at the 20/10/70 ratio.
+
 ### 2026-06-04  (session 5 — dataset feasibility sweep for eval-scope expansion)
 Assessed 14 candidate benchmarks (Spreadsheet, OfficeQA, DocVQA, HotpotQA, IFBench, HoVer,
 PUPA, AIME-2025, LiveBench-Math, ARC-AGI, WebShop, ScienceWorld, AppWorld, ALFWorld) for

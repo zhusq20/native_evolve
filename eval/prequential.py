@@ -47,6 +47,36 @@ def prepare_home(home):
     (home / "memory" / "skill_state.json").write_text("{}", encoding="utf-8")
 
 
+def stratified_split(all_tasks, sizes, seed, stratify_key=""):
+    """Seeded disjoint split into EXACTLY `sizes` = (n0, n1, n2) consecutive slices.
+
+    Follows the SkillOpt manifest roles (train -> rollout evidence; val/selection -> accept/reject
+    skill edits; test -> frozen held-out headline). If `stratify_key` is set and present on every
+    task, strata are interleaved in proportion so any prefix — and thus every slice — preserves the
+    class mix (e.g. SB instruction_type, HotpotQA type). With stratify_key="" this is a plain seeded
+    shuffle, byte-identical to the previous slicing (same seed -> same permutation)."""
+    import collections
+    rng = random.Random(seed)
+    pool = list(all_tasks)
+    rng.shuffle(pool)
+    if stratify_key and all(stratify_key in t for t in pool):
+        groups = collections.OrderedDict()
+        for t in pool:
+            groups.setdefault(t.get(stratify_key), []).append(t)
+        emitted = {g: 0 for g in groups}
+        order, remaining = [], len(pool)
+        while remaining:
+            # emit next from the stratum most "behind" its proportional share
+            g = min((g for g in groups if emitted[g] < len(groups[g])),
+                    key=lambda g: (emitted[g] + 1) / len(groups[g]))
+            order.append(groups[g][emitted[g]])
+            emitted[g] += 1
+            remaining -= 1
+        pool = order
+    a, b, c = sizes
+    return pool[:a], pool[a:a + b], pool[a + b:a + b + c]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tasks", required=True)
@@ -57,12 +87,25 @@ def main():
                              "ace", "external_optimizer"],
                     required=True)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--protocol", choices=["prequential", "frozen"], default="prequential",
+                    help="prequential: online test-then-train on one stream (the learning curve). "
+                         "frozen (SkillOpt-style): acquire on train -> gate skill edits on val -> "
+                         "FREEZE -> headline on held-out test (measures REUSE, not local adaptation).")
     ap.add_argument("--train_n", type=int, default=12,
-                    help="external_optimizer: # disjoint training tasks (after the eval slice)")
+                    help="train/rollout-evidence split: # tasks the method LEARNS on. "
+                         "frozen acquisition stream + external_optimizer offline-training set. "
+                         "SkillOpt SB=80.")
+    ap.add_argument("--verify_n", type=int, default=18,
+                    help="val/selection split: # held-out tasks for the accept/reject skill-edit "
+                         "gate. SkillOpt sizes ~18-40; >6 needed for power over haiku noise (SB=40).")
+    ap.add_argument("--test_n", type=int, default=0,
+                    help="frozen: # held-out TEST tasks for the headline (0 = all remaining after "
+                         "train+val). SkillOpt SB=280.")
+    ap.add_argument("--stratify_key", default="",
+                    help="task field to stratify the splits on so each split keeps the family mix "
+                         "(e.g. instruction_type for SB, type for HotpotQA). '' = plain shuffle.")
     ap.add_argument("--induce_every", type=int, default=16,
                     help="ours_full: run gated skill consolidation every K tasks (0=off)")
-    ap.add_argument("--verify_n", type=int, default=6,
-                    help="ours_full: # held-out tasks for the counterfactual consolidation gate")
     ap.add_argument("--home", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -85,12 +128,21 @@ def main():
     env = envs_pkg.get_env(args.env)
 
     all_tasks = env.load_tasks(args.tasks)
-    rng = random.Random(args.seed)
-    rng.shuffle(all_tasks)
-    tasks = all_tasks[: args.n]                          # eval stream (same across methods)
-    train_tasks = all_tasks[args.n: args.n + args.train_n]  # disjoint, for external optimizer
-    vstart = args.n + args.train_n
-    verify_tasks = all_tasks[vstart: vstart + args.verify_n]  # disjoint, for the consolidation gate
+    # SkillOpt-style disjoint splits: train (rollout evidence the method learns on), val/selection
+    # (verify_tasks: accept/reject the skill-edit gate), test (frozen held-out headline). Optionally
+    # stratified so each split keeps the task-family mix.
+    if args.protocol == "frozen":
+        test_n = args.test_n if args.test_n > 0 else max(
+            0, len(all_tasks) - args.train_n - args.verify_n)
+        need = args.train_n + args.verify_n + test_n
+        if len(all_tasks) < need:
+            sys.stderr.write("WARN: %d tasks < train+val+test=%d; later splits truncated\n"
+                             % (len(all_tasks), need))
+        train_tasks, verify_tasks, tasks = stratified_split(
+            all_tasks, (args.train_n, args.verify_n, test_n), args.seed, args.stratify_key)
+    else:                                                # prequential: eval stream IS the learn stream
+        tasks, train_tasks, verify_tasks = stratified_split(
+            all_tasks, (args.n, args.train_n, args.verify_n), args.seed, args.stratify_key)
 
     # external_optimizer: pay the offline training cost up front, then freeze one skill.
     frozen_skill = ""
@@ -135,97 +187,128 @@ def main():
                          % (idx, bp, fp, vn,
                             ("ACTIVATE %d skills" % len(cands)) if activate else "REJECT (degrade)"))
 
-    out = pathlib.Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    rows = []
-    for idx, task in enumerate(tasks):
-        q = task["question"]
+    LEARN_METHODS = ("episodic", "ours_mem", "ours_full", "ace")
 
-        # --- inject context per method ---
+    def inject(task):
+        """Build the injected memory/skill block for the current method (read-only retrieval)."""
+        q = task["question"]
         injected_ids = []
         if args.method == "episodic":
-            mem_block = episodic.exemplar_block(q)              # raw past-success exemplars (episodic-only)
+            mem = episodic.exemplar_block(q)                    # raw past-success exemplars (episodic-only)
         elif args.method == "ours_mem":
-            mem_block, injected_ids = retrieve.select_and_block(q)  # distilled top-k memory only
+            mem, injected_ids = retrieve.select_and_block(q)    # distilled top-k memory only
         elif args.method == "ours_full":
             epi = episodic.exemplar_block(q)                    # episodic exemplars
             dis, injected_ids = retrieve.select_and_block(q)    # distilled top-k memory
             skl = retrieve.skills_block(q)                      # gated, verified skills (often none)
-            mem_block = "\n\n".join(x for x in (epi, dis, skl) if x)
+            mem = "\n\n".join(x for x in (epi, dis, skl) if x)
         elif args.method == "ace":
-            mem_block = retrieve.full_playbook_block()          # single-tier: full playbook
+            mem = retrieve.full_playbook_block()                # single-tier: full playbook
         elif args.method == "external_optimizer":
-            mem_block = ("## Skill (offline-optimized, frozen)\n" + frozen_skill) if frozen_skill else ""
+            mem = ("## Skill (offline-optimized, frozen)\n" + frozen_skill) if frozen_skill else ""
         else:
-            mem_block = ""                                      # no_memory
+            mem = ""                                            # no_memory
+        return mem, injected_ids
 
+    def process(task, idx, learn, phase):
+        """One task: inject -> target call -> score. If learn, update memory (record/credit/reflect).
+        Deployment (learn=False) is pure inference on a FROZEN store: the held-out test phase."""
+        q = task["question"]
+        mem_block, injected_ids = inject(task)
         try:
             resp = llm.call_claude(env.build_prompt(task, mem_block), allowed_tools="Read")
         except Exception as exc:
             resp = ""
             sys.stderr.write("target error @%d: %s\n" % (idx, exc))
-
         ev = env.score(task, resp)
 
-        # --- record the RAW EPISODE (episodic-first methods): first-class, append-only ---
-        if args.method in ("episodic", "ours_full"):
-            try:
-                episodic.record(task["id"], q, resp, ev["em"] == 1.0)
-            except Exception as exc:
-                sys.stderr.write("episode record error @%d: %s\n" % (idx, exc))
-
-        # --- credit distilled bullets that were injected (deterministic presence/gold) ---
-        if args.method in ("ours_mem", "ours_full") and injected_ids:
-            try:
-                curate.credit(injected_ids, ev["em"] == 1.0)
-            except Exception as exc:
-                sys.stderr.write("credit error @%d: %s\n" % (idx, exc))
-
-        # --- reflect -> distilled memory (methods that maintain a distilled store) ---
-        # promote_skills=False: consolidation is now the NON-DESTRUCTIVE, GATED induce step
-        # (consolidate()), never the old per-bullet promote that drained the memory tier.
-        if args.method in ("ours_mem", "ours_full", "ace"):
-            try:
-                reflect.run(summary=env.summarize(task, resp, ev), promote_skills=False)
-            except Exception as exc:
-                sys.stderr.write("reflect error @%d: %s\n" % (idx, exc))
-
-        # --- gated consolidation (ours_full): induce skills, activate only if they beat the
-        #     episodic+distilled baseline on held-out tasks; else degrade gracefully ---
-        if args.method == "ours_full" and args.induce_every > 0 and (idx + 1) % args.induce_every == 0:
-            try:
-                consolidate(idx)
-            except Exception as exc:
-                sys.stderr.write("consolidate error @%d: %s\n" % (idx, exc))
+        if learn:
+            # record the RAW EPISODE (episodic-first methods): first-class, append-only
+            if args.method in ("episodic", "ours_full"):
+                try:
+                    episodic.record(task["id"], q, resp, ev["em"] == 1.0)
+                except Exception as exc:
+                    sys.stderr.write("episode record error @%d: %s\n" % (idx, exc))
+            # credit distilled bullets that were injected (deterministic presence/gold)
+            if args.method in ("ours_mem", "ours_full") and injected_ids:
+                try:
+                    curate.credit(injected_ids, ev["em"] == 1.0)
+                except Exception as exc:
+                    sys.stderr.write("credit error @%d: %s\n" % (idx, exc))
+            # reflect -> distilled memory (promote_skills=False: consolidation is the gated induce step)
+            if args.method in ("ours_mem", "ours_full", "ace"):
+                try:
+                    reflect.run(summary=env.summarize(task, resp, ev), promote_skills=False)
+                except Exception as exc:
+                    sys.stderr.write("reflect error @%d: %s\n" % (idx, exc))
 
         cc, ct = cum_cost()
         bullets = store.load()
         skill_state = store.load_skill_state()
         n_active_skills = sum(1 for v in skill_state.values() if v.get("status") == "active")
         n_episodes = len(episodic.load()) if args.method in ("episodic", "ours_full") else 0
-        rows.append({
-            "idx": idx, "id": task["id"], "em": ev["em"], "f1": ev["f1"],
+        row = {
+            "idx": idx, "phase": phase, "id": task["id"], "em": ev["em"], "f1": ev["f1"],
             "sub_em": ev["sub_em"], "pred": ev["predicted_answer"][:80],
             "n_bullets": len(bullets), "n_episodes": n_episodes,
             "max_uses": max((b.get("uses", 0) for b in bullets), default=0),
             "max_helpful": max((b.get("helpful", 0) for b in bullets), default=0),
             "n_active_skills": n_active_skills,
             "cum_cost_usd": round(cc, 6), "cum_output_tokens": ct,
-        })
+        }
         sys.stderr.write(
-            "[%s seed%d] %2d/%d em=%.0f f1=%.2f bul=%d ep=%d uses<=%d skills=%d cum=$%.4f\n"
-            % (args.method, args.seed, idx + 1, len(tasks), ev["em"], ev["f1"],
-               rows[-1]["n_bullets"], n_episodes, rows[-1]["max_uses"],
-               rows[-1]["n_active_skills"], cc)
-        )
+            "[%s seed%d %s] %2d em=%.0f f1=%.2f bul=%d ep=%d uses<=%d skills=%d cum=$%.4f\n"
+            % (args.method, args.seed, phase, idx + 1, ev["em"], ev["f1"],
+               row["n_bullets"], n_episodes, row["max_uses"], n_active_skills, cc))
+        return row
+
+    def acquire(stream, phase):
+        """Online prequential learning over a stream (test-then-train) with periodic gated
+        consolidation. Serves as the eval loop (prequential) AND the frozen train-split phase."""
+        out_rows = []
+        for idx, task in enumerate(stream):
+            out_rows.append(process(task, idx, learn=True, phase=phase))
+            if (args.method == "ours_full" and args.induce_every > 0
+                    and (idx + 1) % args.induce_every == 0):
+                try:
+                    consolidate(idx)
+                except Exception as exc:
+                    sys.stderr.write("consolidate error @%d: %s\n" % (idx, exc))
+        return out_rows
+
+    out = pathlib.Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    if args.protocol == "frozen":
+        # ACQUIRE on train (only methods that learn online — external paid its cost up front in
+        # train_external; no_memory has nothing) -> final consolidation -> FREEZE -> DEPLOY on test.
+        acq_rows = []
+        if args.method in LEARN_METHODS:
+            acq_rows = acquire(train_tasks, "acquire")
+            if args.method == "ours_full":
+                try:
+                    consolidate(len(train_tasks) - 1)   # capture late-acquired memory before freezing
+                except Exception as exc:
+                    sys.stderr.write("final consolidate error: %s\n" % exc)
+        sys.stderr.write("[%s seed%d] FROZEN after %d acquire tasks; deploying on %d held-out test...\n"
+                         % (args.method, args.seed, len(acq_rows), len(tasks)))
+        rows = [process(task, idx, learn=False, phase="test") for idx, task in enumerate(tasks)]
+        if acq_rows:                                    # keep the acquisition trace for diagnostics
+            acq_path = out.with_name(out.stem + "_acquire" + out.suffix)
+            with acq_path.open("w", encoding="utf-8") as f:
+                for r in acq_rows:
+                    f.write(json.dumps(r) + "\n")
+    else:
+        rows = acquire(tasks, "eval")                   # prequential: the eval stream IS the learn stream
 
     with out.open("w", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r) + "\n")
     em = sum(r["em"] for r in rows) / max(1, len(rows))
     f1 = sum(r["f1"] for r in rows) / max(1, len(rows))
-    sys.stderr.write("DONE %s seed%d: EM=%.3f F1=%.3f cum=$%.4f -> %s\n"
-                     % (args.method, args.seed, em, f1, rows[-1]["cum_cost_usd"] if rows else 0, out))
+    sys.stderr.write("DONE %s seed%d [%s]: EM=%.3f F1=%.3f cum=$%.4f -> %s\n"
+                     % (args.method, args.seed, args.protocol, em, f1,
+                        rows[-1]["cum_cost_usd"] if rows else 0, out))
 
 
 if __name__ == "__main__":
