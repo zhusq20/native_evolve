@@ -80,7 +80,35 @@ two regimes the literature names —
 - **SpreadsheetBench = diverse / no-shared-procedure** (ids confirm no task families): EPISODIC raw
   reuse wins; consolidation is lossy clutter. → **consolidate only where a shared procedure exists.**
 
-## Open questions / NEXT (priority order) — revised 2026-06-04 (session 4)
+> ⚠️ **RETRACTED (session 7, 2026-06-04).** The "SpreadsheetBench = diverse → consolidation dilutes"
+> half is an **ARTIFACT of our single-shot/haiku harness + a trace-blind reflector, NOT a property
+> of SB.** SkillOpt doubles SB (~0.4→0.8) with **GPT-5.5 + a 30-turn execute→observe→repair loop**;
+> its SB skill *is* a strong shared procedure (a verify-and-repair workflow). Our harness is
+> single-shot with no execution feedback (`prequential.py:163`), so that skill is inert; and our
+> reflector — fed only a 240-char reason, never the traceback — learned the **inverse** skill
+> (≈38% of SB bullets are formula-framed; one induced skill literally says *"write the formula
+> string in actual Excel/Sheets on a test cell first"* → openpyxl never evaluates it → grader sees
+> `None` → fail), which is why consolidation lands *below* no_memory and episodic (no distilled
+> bullets) "wins". **Corrected claim:** our pipeline can't learn SB's shared procedure because it
+> lacks the execution loop the procedure is written for, and our trace-blind reflector learns its
+> inverse. See session-7 changelog + `docs/` for the full SkillOpt investigation.
+
+## Open questions / NEXT (priority order)
+**TOP PRIORITY (session 7, supersedes the list below):** the SB result is harness-limited, not a
+regime law (see RETRACTED note in Results). So the headline next step is to **fix the apparatus +
+learner and re-test online**:
+- **A. Shallow CONDITIONAL execute→feedback→repair loop** in `eval/envs/spreadsheetbench.py`
+  (1–2 turns, only on failure → cheap). Gives the missing upside AND produces error→fix traces.
+- **B. Trace-grounded reflection** — feed the reflector the real traceback + wrong-cell diff (not a
+  240-char reason); add "never write formula strings; compute literals" to `reflector.md`. Kills the
+  inverse-skill poison so consolidation stops hurting.
+- **C.** Then rerun the SB trio ONLINE (haiku fixed): does ours_full flip from −0.01 to positive? +
+  the cost-advantage curve (ours learns-from-own-traces vs external offline).
+- **D.** Fix the gate's false-pos/neg (online rolling-window A/B instead of a tiny/saturated val set).
+- Carried: complete the 6-method SB headline (ace/external), ≥3 seeds, IFBench (mid-range
+  shared-procedure testbed for a clean skill-value demo).
+
+--- earlier list (session 4, partly addressed: frozen protocol + searchqa frozen now DONE) ---
 0. **Add ≥3 seeds to the SB 6-arm scout** to confirm the ordering (episodic ≫ rest at 1 seed,
    but single-seed SB EM has SE≈0.09 — see session-3/4 noise notes).
 1. **searchqa 6-arm + acquisition→FROZEN-DEPLOYMENT protocol** — the SHARED-PROCEDURE regime
@@ -122,6 +150,78 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-04  (session 7 — first frozen runs at scale + the SkillOpt-discrepancy correction)
+Ran the first frozen-protocol experiments at SkillOpt sizes, then traced a discrepancy the user
+flagged that **overturns our SB headline conclusion**.
+
+**1. SB 80/40/280 frozen, 1 seed, serving (the signal run).** Replicated SkillOpt's exact SB split
+(stratified by instruction_type), serving acquisition, 1000×10s retry. **4/6 methods finished**
+(orchestrator died mid-run on a transient `claude` usage cap — see op-notes); ace/external never ran.
+| method | testEM (n=280) | Cell-Level (192) | Sheet-Level (88) |
+|---|---|---|---|
+| no_memory | 0.454 | 0.380 | 0.614 |
+| **episodic** | **0.504** | **0.469** | 0.580 |
+| ours_mem | 0.400 | 0.323 | 0.568 |
+| ours_full | 0.446 | 0.370 | 0.614 |
+→ Signal lives in the harder **Cell-Level** family (episodic +0.089 there); Sheet-Level near-flat.
+The gate **ACTIVATED 6 skills** on ours_full (base 15→16 on val — marginal). Per-family figures in
+`results/sb_frozen/runs/`.
+
+**2. searchqa frozen, 16/8/16 × 3 seeds (the "does ours_full ever help?" validation).**
+| method | testEM (mean±sd) |
+|---|---|
+| no_memory | 0.792 ± 0.078 |
+| episodic | 0.833 ± 0.059 |
+| ours_full | 0.854 ± 0.029 |
+| **external_optimizer** | **0.917 ± 0.029** |
+→ In the SHARED-PROCEDURE regime a skill IS useful (external +0.13). ours_full **doesn't dilute**
+(≥ episodic ≥ no_memory; opposite of SB). BUT the **gate REJECTED ours's own skills** (val saturated
+8/8 → no detectable lift) — a **false negative**: ours_full *induced a genuinely good skill*
+(`exact-match-format-qa`: strip parentheticals, articles, whitespace ≈ what external captured) and
+threw it away. So the **gate has BOTH error modes**: false-POSITIVE on SB (activated diluting skills),
+false-NEGATIVE on searchqa (rejected a useful one). Root: deciding on a tiny/saturated val set.
+Results in `results/searchqa_frozen/`.
+
+**3. THE BIG ONE — SkillOpt 0.4→0.8 vs our degradation (5-agent investigation, both repos).**
+User asked why SkillOpt (`/mlx_devbox/users/siqi.zhu/playground/SkillOpt`) doubles SB while ours
+drops. **Two independent flaws, neither about SB:**
+- **Flaw 1 (apparatus):** SkillOpt SB = `mode: multi, max_turns: 30` execute→error→repair loop on
+  **gpt-5.5** (`configs/spreadsheetbench/default.yaml`, `configs/_base_/default.yaml`,
+  `codegen_agent.py::run_multi`). Its skill is a **verify-and-repair workflow** ("run solution.py,
+  reload workbook, verify target cells are non-formula literals, fix and rerun"). Our harness is
+  **single-shot haiku, no execution feedback** → that skill is dead text → our external_optimizer
+  scores *exactly* no_memory (0 gain).
+- **Flaw 2 (learner):** our reflector gets only a 240-char reason, never the traceback, so it learned
+  the **INVERSE** skill — verified: ≈38% of SB bullets formula-framed; induced skill says *"write the
+  formula string in actual Excel/Sheets on a test cell first"* (the openpyxl-None failure). This is
+  why consolidation falls *below* no_memory and episodic (no distilled bullets) wins.
+- Ruled out: scoring/test-cases (both verified-400, 1 instance/task, byte-identical evaluator; no
+  pass@k). **⇒ "SB diverse → consolidation dilutes" RETRACTED** (see Results note above).
+
+**4. Positioning + optimization direction (design decision).** Confirmed the user's framing: our
+method is **online/native — optimization born ALONGSIDE inference** (reflect→curate→promote in the
+hook loop), fundamentally unlike SkillOpt's **offline external optimizer** (separate gpt-5.5 trainer,
+~4 epochs, validation-gated edits). **Cost advantage is real in principle** (learning = incremental
+reflection amortized into real work, vs a dedicated offline budget) — but only counts once the method
+GAINS. **The涨点 plan that both fixes the flaws AND embodies the "伴生" vision: learn from the agent's
+own REPAIR TRAJECTORY.** Ranked: (1) shallow **conditional** execute→feedback→repair loop in the SB
+env (1–2 turns, only on failure → cheap; gives the upside + produces error→fix traces); (2)
+**trace-grounded reflection** (feed real traceback + wrong-cell diff; add "never write formula
+strings, compute literals" to `reflector.md`) → kills the inverse-skill poison; (3) error-keyed
+episodic retrieval ("you hit error E before; fix was Y" — turns SB's diversity into shared *bug*
+knowledge); (4) pre-emptive guard checklist; (5) online rolling-window gate (live A/B, fixes the
+false-pos/neg). Cost-advantage experiment: accuracy-vs-TOTAL-cost, ours (learns from own traces)
+vs external (offline), agentic SB, haiku fixed.
+
+**Op-notes (for reproducibility):** (a) `workers=1` (one method-run at a time) gave ~54 calls/min vs
+~15/min when 6 runs oversubscribed the box at 60-wide — run methods serially, give each run the full
+concurrency. (b) A transient `claude` usage/rate cap after ~1000 calls returned `exit 1` persistently;
+the 1000×10s fixed retry rides it out, BUT a fully-stalled call hung the process ~15 min and the
+background task got killed — finished methods were safe on disk, restart only the unfinished one.
+**NEXT:** implement涨点 plan #1+#2 (shallow conditional repair loop + trace-grounded reflection), rerun
+the SB trio online (haiku fixed) — does ours_full flip from −0.01 to clearly positive? Then complete
+the 6-method SB headline (ace/external) and add ≥3 seeds.
+
 ### 2026-06-04  (session 6 — SkillOpt-style frozen-deployment protocol + SB exact-split replication)
 Implemented the **frozen-deployment protocol** (the carried NEXT #1: acquisition→FROZEN→held-out
 test) grounded in SkillOpt's train/val/test manifest. Full design: **`docs/eval_protocol.md`**.
