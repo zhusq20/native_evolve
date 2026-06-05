@@ -162,6 +162,53 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-05  (session 8 — Phase 3 IFBench: 4th regime reveals a SECOND axis → the two-axis lever map)
+Built a new **IFBench/IFEval env** (`eval/envs/ifbench.py`): reference-free constraint verifiers,
+stdlib-only reimplementation of 23 IFEval instruction types (skipped `language:response_language`
+[needs langdetect] + `nth_paragraph_first_word`; fetch FILTERS to fully-covered prompts). The defining
+property: **IFEval has no gold — the rubric IS the verifier set — so `verify()` == `score()`'s checks**
+(the most COMPLETE verify possible). Unit-validated (23 verifier pass/fail pairs + score/verify/evidence).
+Data: `eval/data/ifbench_val.jsonl` (60 prompts, 48% multi-constraint). 2×2 prequential n=24 seed0.
+
+| IFBench preqEM (n=24 seed0) | repair=0 | repair=1 |
+|---|---|---|
+| no_memory | 0.667 | 0.792 |
+| ours_full | 0.708 | **0.875** |
+
+repair +0.125 (no_memory) / **+0.167 (ours_full)**, 10/24 fires (most of any env — verify=rubric makes
+every miss visible); memory +0.042 (r0). **The combined cell 0.875 is the BEST and SUPER-ADDITIVE**
+(0.667+0.042+0.125=0.834 < 0.875; ours_full(r1) F1=0.944 of constraints) ⇒ **memory & repair COMPLEMENT.**
+Contrast SB, where combined (0.719) < repair-alone (0.812) ⇒ **SUBSTITUTE.** The discriminator: repair
+helps ours_full MORE than no_memory on IFBench (+0.167 > +0.125) but FAR LESS on SB (+0.03 << +0.34).
+[Repair-yield nuance: IFBench fires repair most but a SINGLE turn only nets +0.125 because multi-constraint
+prompts interact (fixing one constraint breaks another) — strict all-pass is iterative; repair_turns 2–3
+would climb.] Gate REJECTED again (broke 2 > rescued 1).
+
+**THE TWO-AXIS LEVER MAP (four regimes, 1 seed each, preqEM):**
+| regime | env (n) | repair Δ (fires) | memory Δ (r0) | memory×repair | verify character |
+|---|---|---|---|---|---|
+| diverse codegen | SB (32) | **+0.34** (13/32) | +0.22 | **SUBSTITUTE** (combined<repair) | partial (form) → big BLIND SPOT |
+| ref-free verifiable | IFBench (24) | +0.13/+0.17 (10/24) | +0.04 | **COMPLEMENT** (combined best) | **COMPLETE** (verify==rubric) |
+| shared-proc QA | searchqa (24) | ~0 (1–2/24) | **+0.17** | — (repair idle) | weak (format only) |
+| family multi-hop | HotpotQA (24) | 0 (0–1/24) | +0.04 | — (repair idle) | weak; bridge diverse |
+
+**Two orthogonal axes, both governed by `verify`:**
+- **Axis 1 — does repair fire/help?** ∝ verify-VISIBILITY of failures. Crashes/constraint-violations are
+  visible (SB, IFBench) → repair active; QA semantic errors are invisible (searchqa, hotpot) → repair idle.
+- **Axis 2 — do memory & repair STACK or FIGHT?** ∝ verify-COMPLETENESS (blind-spot size). Complete verify
+  (IFBench) → memory's un-prevented failures stay catchable by repair → COMPLEMENT. Incomplete verify with a
+  large blind spot (SB, form-only) → memory pushes failures into the blind spot where repair can't reach →
+  SUBSTITUTE. **General answer to "why do verify & memory conflict": they conflict IFF verify is INCOMPLETE —
+  the conflict IS the blind spot.** Design implication: make verify more complete (add semantic checks on SB)
+  to convert the SB substitution into IFBench-style complementarity (this is the same "memory should target
+  the semantic layer" fix, reframed as verify-completeness).
+
+**Caveats:** 1 seed each. ROBUST: lever identity, fire counts, the qualitative substitute(SB)/complement
+(IFBench) contrast. SOFT: exact magnitudes, super-additivity. **Phase-3 total $22.81 / 929 calls.** New files:
+`eval/envs/ifbench.py`, `eval/data/ifbench_val.jsonl`. Results: `results/_p3_if_r0/`, `results/_p3_if_r1/`.
+**NEXT:** the verify-completeness fix on SB (semantic-layer reflection/checks → test if SB flips to complement);
+≥3 seeds; frozen-reuse + accuracy-vs-cost-vs-external.
+
 ### 2026-06-05  (session 8 — Phase 3 CAPSTONE: HotpotQA 2×2 + the three-regime LEVER MAP)
 Third regime (HotpotQA, families), same memory×repair 2×2, prequential n=24 seed0, stratified by type.
 r0 and r1 came out IDENTICAL per method (repair fired 0–1/24 and changed nothing → repair fully idle).
