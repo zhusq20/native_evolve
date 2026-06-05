@@ -31,10 +31,19 @@ _CRITIQUE = (
 )
 
 
-def self_verify(task, attempt, env, use_exec=True, use_critique=True):
+def self_verify(task, attempt, env, use_exec=True, use_critique=None):
     """Dataset-agnostic reference-free check. Returns {ok, signature, feedback}, or None if there was
-    nothing to check (no exec hook and critique unavailable) so the repair loop simply doesn't fire."""
+    nothing to check (no exec hook and critique unavailable) so the repair loop simply doesn't fire.
+
+    ROUTING (use_critique=None, the default): trust EXECUTION when the task affords it and DON'T also
+    run the LLM self-critique. Measured rationale — on code tasks the self-critique of correctness is
+    noisy: it nitpicks correct code, over-fires repair, and breaks working solutions (SB: exec+critique
+    0.375 vs exec-only 0.750 vs oracle 0.812). The self-critique is precise only for the EXPLICIT,
+    in-prompt constraints of non-code tasks (IFBench: critique 0.792 == oracle). So: execution verdict
+    present -> execution only; no execution -> self-critique. The routing keys on 'is there code to
+    run?', NOT on the dataset, so it stays deployment-realistic. Pass use_critique True/False to force."""
     fails, sigs, had_channel = [], [], False
+    exec_verdict = False
 
     # (1) generic execution probe — run my own code, observe crashes (no gold, no answer-position)
     if use_exec:
@@ -46,12 +55,14 @@ def self_verify(task, attempt, env, use_exec=True, use_critique=True):
                 ran_ok, fb = None, ""
             if ran_ok is not None:
                 had_channel = True
+                exec_verdict = True
                 if ran_ok is False:
                     fails.append((fb or "Execution failed.")[:800])
                     sigs.append("exec")
 
-    # (2) LLM self-critique against the task's OWN stated requirements (general, reference-free)
-    if use_critique:
+    # (2) LLM self-critique — only when execution gave no verdict (non-code tasks), unless forced
+    do_critique = use_critique if use_critique is not None else (not exec_verdict)
+    if do_critique:
         from evolve import llm  # engine is on sys.path once the runner has set it up
         prompt = task.get("prompt") or task.get("question") or ""
         try:

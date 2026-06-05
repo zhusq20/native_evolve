@@ -162,6 +162,37 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-05  (session 8 — oracle-vs-self verify A/B → the precision law + channel-routing fix)
+A/B'd the dataset-blind `self_verify` against the oracle on the cleanest repair cell (no_memory,
+repair_turns 1, same splits/seed as today's oracle runs). Comparison added ~$5.8 (Phase-3 total
+**$28.64 / 1124 calls**):
+
+| no_memory r1 | baseline | oracle | self (exec+crit) | self_exec (exec only) | **self (routed)** |
+|---|---|---|---|---|---|
+| **SB** (32) | 0.469 | 0.812 | **0.375** | **0.750** | **0.750** |
+| **IFBench** (24) | 0.667 | 0.792 | **0.792** | — | **0.792** |
+
+**Findings:**
+1. **IFBench: self-critique == oracle (0.792).** IFEval's constraints are STATED IN THE PROMPT, so "did I
+   follow my own instructions" is precisely LLM-self-checkable WITHOUT dataset knowledge → repair win REAL.
+2. **SB: execution-only (dataset-blind) recovers +0.28 of the +0.34 oracle win** (0.750 vs 0.812; the
+   ~0.06 gap = oracle's answer_position). A coding agent running its own code gets it → repair win REAL.
+3. **BUT naive self (exec+critique) CRASHED to 0.375 — below baseline.** The LLM self-critique of CODE
+   correctness is NOISY: it over-fires (29/32 vs 13), nitpicks correct code, and the spurious "fixes"
+   break it. Same `solve()` loop — ONLY the signal changed — so a noisy signal turns +0.34 into −0.09.
+
+**THE PRECISION LAW (answers the validity critique):** a dataset-blind verify recovers the repair win
+WHEN ITS SIGNAL IS PRECISE — execution for code; explicit in-prompt constraints for instruction-following —
+and BACKFIRES when noisy (LLM vibes-critique of code correctness). **FIX:** `self_verify` now AUTO-ROUTES
+(`use_critique=None` default): execution verdict present → execution only; no execution → self-critique.
+It keys on "is there code to run?", NOT the dataset, so it stays deployment-realistic. Routed self =
+0.750 (SB) / 0.792 (IFBench), both validated by the channel-isolation runs. Cost: self ≈ 2× oracle (the
+extra critique call); the per-row `cum_cost` undercounts self's critique calls (ledger authoritative) — a
+known accounting gap. `--verify_mode {oracle, self, self_exec}`.
+**CONCLUSION:** the lever map SURVIVES a dataset-blind verifier — repair's value is REAL, not an oracle
+artifact — PROVIDED the verify channel matches the failure type (execution↔code, constraint-critique↔
+instruction-following). The naive "LLM-judge everything" verify is the wrong design; channel-routing is right.
+
 ### 2026-06-05  (session 8 — deployment-realistic self_verify: removing dataset knowledge from verify)
 Addressed a VALIDITY critique (user): the per-env `verify()` functions embed dataset knowledge a real
 deployment lacks — IFBench's pre-parsed rubric, SB's answer_position, QA format heuristics, and the

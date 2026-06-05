@@ -134,11 +134,12 @@ def main():
                     help="which methods get the repair loop: 'ours' (episodic/ours_mem/ours_full — "
                          "the headline; baselines stay single-shot), 'all', or a comma list (e.g. "
                          "'no_memory' for the apparatus-only ablation arm).")
-    ap.add_argument("--verify_mode", choices=["oracle", "self"], default="oracle",
+    ap.add_argument("--verify_mode", choices=["oracle", "self", "self_exec"], default="oracle",
                     help="signal that drives the repair loop. oracle: per-env verify() (dataset-aware "
                          "reference-free check — the mechanism's ceiling). self: DATASET-AGNOSTIC "
                          "self_verify (generic execution + LLM self-critique of the agent's own "
-                         "prompt; the deployment-realistic check — costs 1 claude call/verify).")
+                         "prompt; costs 1 claude call/verify). self_exec: dataset-agnostic but "
+                         "EXECUTION ONLY (no LLM critique) — isolates the execution channel.")
     ap.add_argument("--home", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -257,9 +258,12 @@ def main():
         return s
 
     def _do_verify(task, resp):
-        """Route the repair-loop check: oracle (per-env, dataset-aware) or self (dataset-agnostic)."""
+        """Route the repair-loop check: oracle (per-env, dataset-aware), self (dataset-agnostic:
+        execution + LLM critique), or self_exec (dataset-agnostic, execution channel only)."""
         if args.verify_mode == "self":
             return self_verify_mod.self_verify(task, resp, env)
+        if args.verify_mode == "self_exec":
+            return self_verify_mod.self_verify(task, resp, env, use_critique=False)
         return envs_pkg.run_verify(env, task, resp)
 
     def solve(task, mem_block, want_cost=False):

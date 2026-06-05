@@ -91,9 +91,9 @@ def main():
     ap.add_argument("--repair_methods", default="ours",
                     help="which methods get repair: 'ours' (headline; baselines single-shot), "
                          "'all', or a comma list (e.g. 'no_memory' for the apparatus-only ablation).")
-    ap.add_argument("--verify_mode", choices=["oracle", "self"], default="oracle",
-                    help="repair-loop signal: oracle (per-env, dataset-aware) or self "
-                         "(DATASET-AGNOSTIC self_verify: generic exec + LLM self-critique).")
+    ap.add_argument("--verify_mode", choices=["oracle", "self", "self_exec"], default="oracle",
+                    help="repair-loop signal: oracle (per-env, dataset-aware), self (DATASET-AGNOSTIC: "
+                         "generic exec + LLM self-critique), or self_exec (exec channel only).")
     args = ap.parse_args()
 
     methods = [m.strip() for m in args.methods.split(",") if m.strip()]
