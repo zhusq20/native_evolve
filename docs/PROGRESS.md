@@ -162,6 +162,40 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-05  (session 8 — Phase 3 CAPSTONE: HotpotQA 2×2 + the three-regime LEVER MAP)
+Third regime (HotpotQA, families), same memory×repair 2×2, prequential n=24 seed0, stratified by type.
+r0 and r1 came out IDENTICAL per method (repair fired 0–1/24 and changed nothing → repair fully idle).
+Phase-3 cumulative **$19.30 / 719 calls**.
+
+| HotpotQA (n=24 seed0) | flat | bridge (n=20) | comparison (n=4) |
+|---|---|---|---|
+| no_memory (r0=r1) | 0.708 | 0.650 | 1.000 |
+| ours_full (r0=r1) | 0.750 | 0.700 | 1.000 |
+
+Memory +0.042 flat (+0.05 bridge) — direction consistent with searchqa but **within noise (1 task)**; repair
+**exactly 0**. Per-type explains the weakness: **comparison** (the crisp shared-procedure family where memory
+should shine) is at **CEILING (1.000)** → no headroom; **bridge** (the headroom family, 0.65) is **diverse**
+(different entity each hop) → no shared procedure + semantic failures verify can't see. Gate REJECTED again
+(rescued=0=broke) — no skill activation; the skill-formation test couldn't fire because its shared-procedure
+family has no headroom. So HotpotQA-bridge = the regime where NEITHER lever has strong purchase.
+
+**THE THREE-REGIME LEVER MAP (Phase-3 deliverable; 1 seed each, preqEM):**
+| regime | env | repair (fire rate) | memory (r0) | carried by | precondition met |
+|---|---|---|---|---|---|
+| diverse codegen | SB n=32 | **+0.34** (13/32) | +0.22 | **REPAIR** | failures verify-VISIBLE (crash/poison) |
+| shared-proc QA | searchqa n=24 | ~0 (1–2/24) | **+0.17** | **MEMORY** | shared procedure + HEADROOM |
+| family multi-hop | HotpotQA n=24 | 0 (0–1/24) | +0.04 | weak/NEITHER | comparison=ceiling, bridge=diverse |
+
+**Refined principle (the answer to "works across benchmark natures"):** the apparatus carries TWO levers and
+each regime auto-draws the one whose precondition holds — **repair** fires iff failures are *verify-visible*
+(executable-form: codegen yes, QA no); **memory** helps iff a *shared procedure AND headroom* coexist
+(searchqa yes; SB yes via trace-grounded reflection but dominated by repair; HotpotQA neither family qualifies).
+They SUBSTITUTE only where verify's blind spot is large (SB). Generality = carrying both, not one mechanism
+winning everywhere. **NEXT:** ≥3 seeds to firm magnitudes; the "make memory target the SEMANTIC layer so it
+covers repair's blind spot and they STACK" fix on SB; a headroom-bearing shared-procedure family (IFBench, or
+non-ceiling comparison) to give the skill-formation gate a fair test; frozen-reuse + accuracy-vs-cost-vs-external.
+Results: `results/_p3_hp_r0/`, `results/_p3_hp_r1/`.
+
 ### 2026-06-04  (session 8 — Phase 3 CROSS-REGIME: searchqa 2×2 mirrors SB → the lever-identity result)
 Ran the SAME 2×2 (memory × repair) on **searchqa (shared-procedure regime)**, prequential n=24 seed0,
 verify_n=12, to test whether the memory↔repair interaction is regime-dependent. It is — searchqa is the
