@@ -249,10 +249,24 @@ the session-8 "`verify` embeds dataset knowledge" critique — `self_verify` was
 **Validity caveat (documented, mitigation ready):** soft gold-isolation (sandbox holds only the input;
 graded by running CODE on all cases) — `bypassPermissions`+Bash could technically `find` golden on this
 box; for the billed headline enable the bubblewrap OS sandbox (`--settings` `denyRead` the dataset dir),
-noted in the design doc. **NEXT:** billed smoke `no_memory` SB n=12 seed0, agentic, native_skills "" vs
-self-verify-and-repair — does the skill arm ≫ no-skill arm (the SkillOpt-style 0.4→0.8)? Then scale
-seeds + the ours_full learned-skill-vs-ceiling comparison. (Needs budget sign-off — multi-turn ⇒ higher
-$/task.)
+noted in the design doc.
+
+**FIRST BILLED AGENTIC RESULT (smoke, `no_memory` SB n=12 seed0, stratified, agentic max_turns=20, haiku):**
+| arm | EM | per-idx | rescued/broke | $/task |
+|---|---|---|---|---|
+| noskill (bare agentic) | 0.417 | 000011011100 | — | $0.087 |
+| **+ self-verify-and-repair** | **0.583** | 000111011101 | **2 / 0** | $0.078 |
+→ **The native procedural skill helped MONOTONICALLY (+0.167 = 2/12; rescued 2, broke 0) AND was CHEAPER**
+(skill arm converges in fewer turns). End-to-end probe confirmed the harness is sound: real multi-turn tool
+use, skill discovered+installed, agent wrote+ran `solution.py`, gold isolation held. **Two readings, both
+useful:** (a) bare agentic 0.417 ≈ the old single-shot baseline (~0.47 @n=32) ⇒ multi-turn tool-use ALONE
+barely moves SB; the SKILL is the treatment that adds the lift — the cleanest "procedural skill needs a body
+AND the right content" story. (b) Even the skill arm isn't perfect (the probe still wrote formula-string
+poison on one task) — haiku follows the verify step imperfectly, so the lift is real but capped by the model.
+**CAVEATS:** 1 seed, n=12, SE≈0.144 ⇒ +0.167 ≈ 1.2 SE = SIGNAL, not significance. Runs (gitignored):
+`results/_ag_sb_{noskill,skill}/`. **NEXT:** ≥3 seeds + larger n on this 2-arm A/B to firm up; add the
+single-shot no_memory row as the floor; then the `ours_full` agentic arm (learned+gated skill vs the
+native-skill ceiling, the C1 / calibrated-promotion story); optional: bubblewrap hard isolation for the headline.
 
 ### 2026-06-05  (session 10 — `self_both`+N3 made the default; SB 2×2 rerun → SUBSTITUTE flips to COMPLEMENT)
 Acted on the session-9 NEXT ("run the N3 probe; re-run the SB lever-map cell under the FIXED loop"). Made
