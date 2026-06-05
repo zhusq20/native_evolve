@@ -33,6 +33,19 @@ SAME underlying lesson across domains:
 Read the GROUNDED DIAGNOSIS first and turn the concrete mismatch it reports into ONE general,
 reusable heuristic for tasks of the same KIND.
 
+THE SECOND PRINCIPLE — when the FORM is right but the VALUE is wrong, fix the LOGIC.
+Not every failure is a form mismatch. When the GROUNDED DIAGNOSIS says "SEMANTIC ERROR (code ran,
+target cells hold literals, but the COMPUTED VALUES are WRONG)" and shows per-cell expected-vs-got
+values, the output SHAPE is already correct — the agent computed the WRONG NUMBER. An execution/form
+check cannot catch this; only the gold-grounded value diff reveals it. Diagnose WHY the value is wrong
+from the instruction together with the expected-vs-got pair (wrong operation, filter/condition,
+aggregation, rounding, units, off-by-one, sign, date basis, which rows/columns included), and record a
+TRANSFERABLE rule about THIS KIND of computation — e.g. "for a running total, accumulate within each
+group and reset at the group boundary", "round currency to 2 dp only at the very end", "exclude the
+header row from the aggregation", "count distinct values, not rows". Do NOT record this task's specific
+answer, and do NOT downgrade a value error into a formatting tip — here the lesson is the COMPUTATION,
+not the form.
+
 What to record:
 - Prefer: reusable heuristics, pitfalls / failure modes, concrete tool/library usage. KEEP the
   domain specifics that make the heuristic actionable ("verify the header row index before writing

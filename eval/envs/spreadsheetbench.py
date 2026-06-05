@@ -119,6 +119,71 @@ def _inspect_target_cells(xlsx_path, answer_position, max_cells=12):
     return out
 
 
+def _norm(v):
+    """Light value normalization for the semantic diff's mismatch flag (the grader has ALREADY decided
+    the task is wrong; this only selects WHICH cells to surface to the reflector). Numbers (and numeric
+    strings) compared with float tolerance; other text stripped + casefolded; None stays None."""
+    if isinstance(v, bool) or v is None:
+        return v
+    if isinstance(v, (int, float)):
+        return round(float(v), 6)
+    s = str(v).strip()
+    try:
+        return round(float(s), 6)
+    except (ValueError, TypeError):
+        return s.casefold()
+
+
+def _gold_vs_pred(pred_path, golden_path, answer_position, max_cells=12):
+    """GOLD-GROUNDED semantic diff for trace-grounded reflection: compare the COMPUTED VALUES the grader
+    reads in the produced vs the golden workbook, cell by cell. This is the SEMANTIC layer the
+    reference-free form check (verify/try_run) is blind to — code that ran, wrote literals into the right
+    cells, but computed the WRONG NUMBER. It READS the *_golden* file, so it is for REFLECTION/training
+    ONLY: it rides on score() (which already uses gold to grade) and is surfaced solely via
+    evidence()/_diagnose at train time; it is NEVER reachable from verify()/try_run() (the gold-free
+    repair signal). data_only=True -> cached computed values, so a literal cell is compared on its value
+    (a formula-STRING cell reads as None here and is left to the form branch). Cells whose GOLD value is
+    None are skipped (no expected value to teach from). Returns [{coord, gold, pred, mismatch}, ...]."""
+    try:
+        wp = openpyxl.load_workbook(pred_path, data_only=True)
+        wg = openpyxl.load_workbook(golden_path, data_only=True)
+    except Exception as e:  # noqa: BLE001
+        return [{"coord": "?", "note": "could not open workbooks for value diff: %s" % e}]
+    out = []
+    try:
+        for scr in (answer_position or "").split(","):
+            scr = scr.strip()
+            if not scr:
+                continue
+            if "!" in scr:
+                sn, rng = scr.split("!", 1)
+                sn = sn.strip().strip("'\"")
+            else:
+                sn = wg.sheetnames[0]
+                rng = scr
+            rng = rng.strip().strip("'\"")
+            if sn not in wg.sheetnames:
+                continue
+            gs = wg[sn]
+            ps = wp[sn] if sn in wp.sheetnames else None
+            for cn in _evalmod._generate_cell_names(rng):
+                gv = gs[cn].value
+                if gv is None:                       # no expected value to teach from -> skip
+                    continue
+                pv = ps[cn].value if ps is not None else None
+                out.append({
+                    "coord": "%s!%s" % (sn, cn),
+                    "gold": repr(gv)[:48],
+                    "pred": repr(pv)[:48],
+                    "mismatch": _norm(gv) != _norm(pv),
+                })
+                if len(out) >= max_cells:
+                    return out
+    finally:
+        wg.close(); wp.close()
+    return out
+
+
 def _preview(xlsx, max_rows=5, max_cols=20):
     try:
         wb = openpyxl.load_workbook(xlsx, data_only=False)
@@ -194,7 +259,10 @@ def score(task, response):
                 if diag is None:                  # inspect pred BEFORE the tempdir is removed
                     diag = {"executed": True, "traceback": "",
                             "cell_reason": ev.get("reason", ""),
-                            "target_cells": _inspect_target_cells(pred, ap)}
+                            "target_cells": _inspect_target_cells(pred, ap),
+                            # gold-grounded value diff (train-only; surfaced via evidence()/_diagnose,
+                            # never via the gold-free verify()/try_run()) -> the SEMANTIC layer
+                            "value_diff": _gold_vs_pred(pred, golden, ap)}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     em = 1.0 if (cases and n_pass == len(cases)) else 0.0
@@ -242,7 +310,20 @@ def _diagnose(diag):
                      " — the code did not write the expected output cells.")
     if diag.get("cell_reason"):
         parts.append("Grader's first mismatch — " + str(diag["cell_reason"]))
-    if cells and not formula and not nones:
+    value_diff = diag.get("value_diff") or []
+    mism = [d for d in value_diff if d.get("mismatch")]
+    if cells and not formula and not nones and mism:
+        # FORM is clean (ran, wrote literals into the right cells) but the VALUES are WRONG -> the
+        # SEMANTIC blind spot the reference-free form/execution check cannot see. Teach the LOGIC,
+        # not the form (gated on form-clean so it never competes with the formula/None lessons above).
+        parts.append(
+            "SEMANTIC ERROR (code ran, target cells hold literals, but the COMPUTED VALUES are WRONG — "
+            "the failure a form/execution check CANNOT catch). Per-cell expected-vs-got:\n"
+            + "\n".join("  %s: expected %s, got %s" % (d["coord"], d["gold"], d["pred"]) for d in mism[:8])
+            + "\nThe bug is in the LOGIC, not the openpyxl form: re-derive HOW the answer should be "
+            "computed from the instruction (operation / filter / aggregation / rounding / units / which "
+            "rows) and record a transferable rule about THIS KIND of computation — not a formatting tip.")
+    elif cells and not formula and not nones:
         parts.append("Values written to target cells: "
                      + "; ".join("%s=%s" % (c["coord"], c.get("value")) for c in cells[:6]))
     return "\n".join(parts)

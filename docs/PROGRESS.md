@@ -59,7 +59,11 @@ The apparatus carries TWO levers (reference-free **repair** + self-evolving **me
   is PRECISE — execution for code (SB self_exec **0.750** ≈ oracle 0.812), in-prompt constraints for
   instruction-following (IFBench self **0.792** == oracle) — and BACKFIRES when noisy (SB exec+LLM-critique
   **0.375**, below baseline 0.469). Fix = channel-routing `self_verify`. ⇒ **the lever map SURVIVES a
-  realistic verifier; repair's value is real, not an oracle artifact.**
+  realistic verifier; repair's value is real, not an oracle artifact.** [**session-9 correction:** the
+  0.375 backfire was partly a NON-MONOTONE-LOOP bug; with `monotone_repair` + exec-authoritative critique,
+  forced exec+critique recovers to **0.719 ≥ baseline** — a noisy signal now degrades gracefully instead
+  of backfiring. The precision law holds in spirit (critique adds no value beyond exec on code) but no
+  longer HURTS. See the session-9 changelog.]
 - Two robust wins: reference-free repair ~doubles SB gold-free (0.47→0.81); trace-grounded reflection
   flipped SB memory from net-harmful (session-7) to +0.22. **All 1-seed signals — details in the session-8
   changelog.** Raw runs: gitignored `results/_p3_*/`.
@@ -187,6 +191,30 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-05  (session 9 — critique-safety: the 0.375 was a LOOP BUG; monotone repair + exec-authoritative + N3 semantic-diff + routing-by-code-block)
+User scrutinized the precision-law result (SB exec+critique 0.375 < baseline 0.469): "a critique signal should at worst be IGNORED, never drag BELOW baseline." Correct — the drop was a **non-monotone repair-loop BUG**, not merely a noisy signal. All fixes unit-validated offline (zero spend), then confirmed with a billed n=32 A/B.
+
+**Diagnosis.** The old `solve()` repair loop (a) blindly REPLACED the attempt with each repair without checking it improved anything, and (b) with `repair_turns=1` the final repair was SCORED WITHOUT EVER BEING VERIFIED. So an over-firing critique that spuriously rejected a CORRECT first attempt discarded it and scored a worse rewrite → below baseline. A purely additive optional-repair signal must asymptote to baseline, never below it.
+
+**Fix B — `monotone_repair` (general, `prequential.py`).** Verify-gated + MONOTONE: a repair replaces the single-shot attempt ONLY if it RE-VERIFIES as ok; else the baseline is kept (at most we iterate from the failing candidate for context). Extracted to a module-level, directly unit-tested function (8 cases incl. the exact regression). Closes both bugs.
+
+**Fix A — execution-authoritative critique (`self_verify.py`).** A clean execution VERDICT vetoes the critique: on code, critique is ADVISORY (never flips ok→fail; only ENRICHES the repair feedback when execution already failed). Forcing critique on can no longer trigger a spurious repair on correct code.
+
+**Validation (billed, haiku, SB no_memory n=32 seed0, repair_turns 1):**
+| condition | EM |
+|---|---|
+| baseline (no repair) | 0.469 |
+| OLD exec+critique (`_p3_sb_self`) | 0.375  ← the bug (below baseline) |
+| **NEW exec+critique (`self_both`, FIXED)** | **0.719  (+0.344 recovery; now ≥ baseline ≈ exec-only)** |
+| exec-only (`self_exec`, monotone refactor) | 0.688  (≈ OLD 0.750; 0.7 SE = haiku noise, no regression) |
+→ **The fix works: critique can no longer drag below baseline** (0.375→0.719, ~11 tasks ≫ noise). The precision-law "backfire" was AMPLIFIED by the non-monotone loop; with a monotone+authoritative loop a noisy signal DEGRADES GRACEFULLY to the precise channel's level instead of backfiring. The precision law still holds in spirit (critique adds NO value beyond exec on code) — it just no longer HURTS. `self_both` cost ≈ 2× exec-only (84 vs 42 calls). New `--verify_mode self_both` (force exec+critique).
+
+**Also this session:**
+- **Routing by code-block, not env (`self_verify.py`).** `_has_code_block(attempt)` picks the channel (code→exec, else critique) — a property of the ATTEMPT, never the dataset. `--verify_mode` default flipped **oracle → self** (deployment-realistic; oracle must now be passed explicitly to reproduce the session-8 oracle map). Unit-validated (6 routing cases).
+- **N3 semantic-diff code (`spreadsheetbench.py` + `reflector.md`), ready as the $3–4 probe.** Gold-grounded `_gold_vs_pred` value diff (train-only; rides on `score()`'s gold, NEVER reachable from the gold-free `verify()`/`try_run()` — statically asserted); a SEMANTIC reflection branch in `_diagnose` gated on "form-clean AND value-mismatch"; a parallel "fix the LOGIC not the form" principle in `reflector.md`. Tests if SB flips SUBSTITUTE→COMPLEMENT. Unit-validated; NOT yet run online.
+
+Files: `eval/{self_verify,prequential,run}.py`, `eval/envs/spreadsheetbench.py`, `engine/prompts/reflector.md`. Results (gitignored): `results/_fix_sb_self{both,exec}/`. **NEXT:** run the N3 probe; re-run the routed-self lever-map `ours_full` cells under the FIXED loop; ≥3 seeds; N5 cost-leak fix (still open).
+
 ### 2026-06-05  (session 8 — oracle-vs-self verify A/B → the precision law + channel-routing fix)
 A/B'd the dataset-blind `self_verify` against the oracle on the cleanest repair cell (no_memory,
 repair_turns 1, same splits/seed as today's oracle runs). Comparison added ~$5.8 (Phase-3 total

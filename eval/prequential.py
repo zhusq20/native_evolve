@@ -77,6 +77,46 @@ def stratified_split(all_tasks, sizes, seed, stratify_key=""):
     return pool[:a], pool[a:a + b], pool[a + b:a + b + c]
 
 
+def monotone_repair(resp, verify, repair_call, repair_turns, make_hint):
+    """Verify-gated, MONOTONE repair loop. Returns (result, sigs, trace, ncalls).
+
+    THE INVARIANT (why a noisy verify can never drop us BELOW the single-shot baseline): the returned
+    `result` is the single-shot `resp` UNLESS some repair attempt VERIFY-PASSES. A repair is adopted
+    ONLY when re-verification says ok; a repair that still fails verify is NEVER returned (we keep the
+    baseline and, at most, iterate from the failing candidate for extra context). This closes two bugs in
+    the old loop: (1) it blindly replaced `resp` with the repair without checking it improved anything, so
+    an over-firing signal that rejected a CORRECT first attempt would swap in a worse one and score it —
+    dropping BELOW baseline; (2) with repair_turns=1 the final repair was scored without ever being
+    verified. `verify(r)->verdict|None`; `repair_call(verdict, hint)->str` (may raise); `make_hint(sig)
+    ->str`. The result is what the caller should SCORE and record (consistent with the trace)."""
+    result = resp
+    sigs, trace, ncalls = [], [], 0
+    if repair_turns <= 0:
+        return result, sigs, trace, ncalls
+    cur, vr = resp, verify(resp)
+    for _ in range(repair_turns):
+        if not vr or vr.get("ok"):                   # current attempt verifies (or is unverifiable)
+            break
+        sig = vr.get("signature", "")
+        try:
+            cand = repair_call(vr, make_hint(sig))
+        except Exception as exc:                     # noqa: BLE001
+            sys.stderr.write("repair call error: %s\n" % exc)
+            break
+        cand_vr = verify(cand)
+        ncalls += 1
+        sigs.append(sig)
+        trace.append({"signature": sig, "feedback": vr.get("feedback", ""),
+                      "before": cur, "after": cand})
+        if cand_vr is not None and cand_vr.get("ok"):
+            result = cand                            # repair RESOLVED the issue -> adopt it & stop
+            break
+        if cand_vr is None:
+            break                                    # can't evaluate the repair -> keep baseline
+        cur, vr = cand, cand_vr                      # still failing -> keep baseline, iterate from cand
+    return result, sigs, trace, ncalls
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tasks", required=True)
@@ -134,12 +174,14 @@ def main():
                     help="which methods get the repair loop: 'ours' (episodic/ours_mem/ours_full — "
                          "the headline; baselines stay single-shot), 'all', or a comma list (e.g. "
                          "'no_memory' for the apparatus-only ablation arm).")
-    ap.add_argument("--verify_mode", choices=["oracle", "self", "self_exec"], default="oracle",
-                    help="signal that drives the repair loop. oracle: per-env verify() (dataset-aware "
-                         "reference-free check — the mechanism's ceiling). self: DATASET-AGNOSTIC "
-                         "self_verify (generic execution + LLM self-critique of the agent's own "
-                         "prompt; costs 1 claude call/verify). self_exec: dataset-agnostic but "
-                         "EXECUTION ONLY (no LLM critique) — isolates the execution channel.")
+    ap.add_argument("--verify_mode", choices=["oracle", "self", "self_exec", "self_both"], default="self",
+                    help="signal that drives the repair loop. self (DEFAULT, deployment-realistic): "
+                         "DATASET-AGNOSTIC self_verify — routes on whether the ATTEMPT carries a code "
+                         "block (execute it) or not (LLM self-critique of the agent's own prompt; ~1 "
+                         "claude call/verify). self_exec: dataset-agnostic, EXECUTION ONLY (no critique). "
+                         "self_both: force exec+critique together (critique advisory on a clean run — "
+                         "the ablation that confirms critique can't drag below baseline). oracle: per-env "
+                         "verify() (dataset-AWARE ceiling/back-compat; pass explicitly for the oracle map).")
     ap.add_argument("--home", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -264,6 +306,8 @@ def main():
             return self_verify_mod.self_verify(task, resp, env)
         if args.verify_mode == "self_exec":
             return self_verify_mod.self_verify(task, resp, env, use_critique=False)
+        if args.verify_mode == "self_both":   # force exec+critique together (critique stays advisory
+            return self_verify_mod.self_verify(task, resp, env, use_critique=True)  # on a clean run)
         return envs_pkg.run_verify(env, task, resp)
 
     def solve(task, mem_block, want_cost=False):
@@ -287,43 +331,37 @@ def main():
         except Exception as exc:
             resp = ""
             sys.stderr.write("target error: %s\n" % exc)
-        sigs, trace, ncalls = [], [], 0
-        for _ in range(REPAIR_TURNS):
+
+        def _verify(r):
             try:
-                vr = _do_verify(task, resp)
+                return _do_verify(task, r)
             except Exception:
-                vr = None
-            if not vr or vr.get("ok"):
-                break
-            sig = vr.get("signature", "")
-            hint = ""
-            hint_fn = getattr(episodic, "repair_hint", None)     # Phase 2 fills this in
+                return None
+
+        def _make_hint(sig):
+            hint_fn = getattr(episodic, "repair_hint", None)         # Phase 2 fills this in
             if hint_fn and args.method in ("episodic", "ours_full"):
                 try:
-                    hint = hint_fn(task.get("question", ""), sig)
+                    return hint_fn(task.get("question", ""), sig)
                 except Exception:
-                    hint = ""
-            prev = resp
-            try:
-                resp = _call(base + _repair_suffix(vr, hint))
-            except Exception as exc:
-                sys.stderr.write("repair call error: %s\n" % exc)
-                resp = prev
-                break
-            sigs.append(sig)
-            trace.append({"signature": sig, "feedback": vr.get("feedback", ""),
-                          "before": prev, "after": resp})
-            ncalls += 1
+                    return ""
+            return ""
+
+        # MONOTONE repair: only a VERIFY-PASSING repair replaces the single-shot attempt, so a noisy /
+        # over-firing verify (e.g. critique nitpicking correct code) can never score BELOW baseline.
+        result, sigs, trace, ncalls = monotone_repair(
+            resp, _verify, lambda vr, hint: _call(base + _repair_suffix(vr, hint)),
+            REPAIR_TURNS, _make_hint)
         try:
-            ev = env.score(task, resp)
+            ev = env.score(task, result)
         except Exception as exc:
             sys.stderr.write("score error: %s\n" % exc)
             ev = {"em": 0.0, "f1": 0.0, "sub_em": 0.0, "predicted_answer": ""}
         if isinstance(ev, dict) and trace:               # let reflection see the error->fix path
             ev["_repair_trace"] = trace                  # (rendered into evidence via collect_evidence)
             ev["_repair_signatures"] = sigs              # failure modes overcome (-> episodic signature)
-        return resp, ev, {"repair_calls": ncalls, "signatures": sigs,
-                          "cost": cost[0], "trace": trace}
+        return result, ev, {"repair_calls": ncalls, "signatures": sigs,
+                            "cost": cost[0], "trace": trace}
 
     def inject(task):
         """Build the injected memory/skill block for the current method (read-only retrieval)."""

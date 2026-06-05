@@ -21,7 +21,7 @@ CODE_DIR = pathlib.Path(__file__).resolve().parents[1]
 def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
             protocol="prequential", test_n=0, verify_n=18, stratify_key="", induce_every=16,
             deploy_workers=1, acquire_mode="sequential", learn_workers=4,
-            repair_turns=0, repair_methods="ours", verify_mode="oracle"):
+            repair_turns=0, repair_methods="ours", verify_mode="self"):
     home = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "home"
     home.mkdir(parents=True, exist_ok=True)
     out = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "tasks.jsonl"
@@ -91,9 +91,11 @@ def main():
     ap.add_argument("--repair_methods", default="ours",
                     help="which methods get repair: 'ours' (headline; baselines single-shot), "
                          "'all', or a comma list (e.g. 'no_memory' for the apparatus-only ablation).")
-    ap.add_argument("--verify_mode", choices=["oracle", "self", "self_exec"], default="oracle",
-                    help="repair-loop signal: oracle (per-env, dataset-aware), self (DATASET-AGNOSTIC: "
-                         "generic exec + LLM self-critique), or self_exec (exec channel only).")
+    ap.add_argument("--verify_mode", choices=["oracle", "self", "self_exec", "self_both"], default="self",
+                    help="repair-loop signal: self (DEFAULT, DATASET-AGNOSTIC: route on code-block -> "
+                         "exec, else LLM self-critique), self_exec (exec channel only), self_both (force "
+                         "exec+critique together — critique advisory on a clean run), or oracle "
+                         "(per-env, dataset-AWARE ceiling; pass explicitly to reproduce the oracle map).")
     args = ap.parse_args()
 
     methods = [m.strip() for m in args.methods.split(",") if m.strip()]
