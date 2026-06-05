@@ -35,7 +35,8 @@ acc-vs-cost is fair. Baselines, all on the same `claude` CLI + same target model
   conditional **repair** (`--repair_turns`) driven by a reference-free verify; gold-grounded
   `env.evidence()` → **trace-grounded reflection** (killed the inverse-skill poison); **signature-keyed
   episodic** + `repair_hint`; **rolling-window** consolidation gate; **dataset-blind `self_verify`**
-  (execution + self-critique, auto-routed; `--verify_mode oracle|self|self_exec`). New env: **IFBench**
+  (execution + self-critique, auto-routed; `--verify_mode oracle|self|self_exec|self_both`, **default now
+  `self_both`** = run BOTH exec + semantic critique, critique advisory on a clean run). New env: **IFBench**
   (reference-free constraint verifiers). ✓
 
 ## Results so far  (haiku target, n small, 1–2 seeds — SIGNALS not significance)
@@ -67,6 +68,11 @@ The apparatus carries TWO levers (reference-free **repair** + self-evolving **me
 - Two robust wins: reference-free repair ~doubles SB gold-free (0.47→0.81); trace-grounded reflection
   flipped SB memory from net-harmful (session-7) to +0.22. **All 1-seed signals — details in the session-8
   changelog.** Raw runs: gitignored `results/_p3_*/`.
+- **[session-10 UPDATE] SB flips SUBSTITUTE→COMPLEMENT under the new `self_both`+N3 default** (deployment-
+  realistic, NOT oracle): the full 2×2 gives D(mem+repair)=0.750 = best cell, > repair-alone 0.625 and >
+  memory-alone 0.625; **memory @ repair-on went −0.09 (session-8 oracle) → +0.125** — memory no longer
+  fights repair. 1-seed signal, CONFOUNDED (vs session-8 both verify changed oracle→self_both AND N3 added;
+  weaker repair leaves headroom) → needs ≥3 seeds + a (self_both, no-N3) control. See the session-10 changelog.
 
 > The session ≤7 tables below are HISTORICAL (single-shot harness, pre-repair, pre-trace-grounding) and are
 > SUPERSEDED by the lever map above; kept for the record.
@@ -142,7 +148,11 @@ headline + session-8 changelog). What's genuinely next:
   signal into significance.
 - **Verify-completeness / semantic-memory fix on SB:** make memory learn the SEMANTIC layer (why the VALUE
   is wrong, from gold-grounded evidence) to cover verify's blind spot → test if SB flips SUBSTITUTE→
-  COMPLEMENT (the IFBench pattern). This is the highest-insight follow-up.
+  COMPLEMENT (the IFBench pattern). This is the highest-insight follow-up. **[session-10: BUILT (N3 semantic
+  diff) + first online 2×2 run → SB DID flip to COMPLEMENT under `self_both`+N3 (1 seed, confounded).** Two
+  remaining: (a) ≥3 seeds for significance; (b) a **(self_both, no-N3) control** to attribute the flip to N3
+  semantic memory vs merely-weaker self_both repair — needs a `--no_semantic_reflect` switch (N3 is currently
+  unconditional in the SB env).]
 - **`repair_turns` 2–3 on IFBench** (multi-constraint satisfaction is iterative → expect higher yield).
 - **Cost honesty:** route `self_verify`'s critique-call cost into the per-task ledger row (currently
   undercounts; ledger total is authoritative).
@@ -191,6 +201,49 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-05  (session 10 — `self_both`+N3 made the default; SB 2×2 rerun → SUBSTITUTE flips to COMPLEMENT)
+Acted on the session-9 NEXT ("run the N3 probe; re-run the SB lever-map cell under the FIXED loop"). Made
+the deployment-realistic combo the **default verification** and reran the full SB make-or-break 2×2 under it.
+
+**Config change (3 default flips, `eval/run.py` + `eval/prequential.py`): `--verify_mode` default `self` →
+`self_both`** = run BOTH dataset-agnostic channels (EXECUTION + LLM semantic self-critique) every verify, with
+the session-9 guardrail intact (a clean execution stays AUTHORITATIVE, so on code the critique is ADVISORY —
+enriches the failure feedback, never flips ok→fail → can't drag below baseline). N3 gold-grounded semantic
+reflection is unconditional in the SB env (train-only, firewalled from the gold-free verify), so it rides
+along for free on any ours_full SB run. Old modes kept (`oracle`/`self`/`self_exec`, pass explicitly).
+
+**SB 2×2 (memory × repair), prequential n=32 seed0, stratify=instruction_type, induce_every=16, `self_both`+N3:**
+| preqEM | repair=0 | repair=1 |
+|---|---|---|
+| no_memory | 0.531 (A) | 0.625 (B) |
+| ours_full | 0.625 (C) | **0.750 (D)** |
+
+Marginals: memory @r0 (C−A)=**+0.094**, memory @r1 (D−B)=**+0.125**; repair @no_mem (B−A)=**+0.094** (11/32
+fire), repair @ours_full (D−C)=**+0.125** (only **1/32** fire). **Interaction (D−C)−(B−A)=+0.031>0; D=0.750 is
+the BEST cell, > repair-alone (0.625) AND > memory-alone (0.625), slightly super-additive (0.531+0.094+0.094=
+0.719<0.750) ⇒ COMPLEMENT.** Rolling gate **ACTIVATED 6 skills @31** (rescued=4 broke=2) — the FIRST positive
+SB activation in the project (too late in the stream to move this run's EM, but the gate finally fired right).
+
+**THE FLIP vs session-8 (oracle, no N3) — same SB cell:**
+| | session-8 (oracle, no-N3) | session-10 (`self_both`+N3) |
+|---|---|---|
+| memory @ repair-on (D−B) | **−0.093 (HARMFUL)** | **+0.125 (HELPFUL)** |
+| best cell vs repair-alone | D 0.719 **<** B 0.812 | D 0.750 **>** B 0.625 |
+| verdict | SUBSTITUTE | **COMPLEMENT** |
+
+The substantive change: **memory stopped fighting repair** — exactly the session-9 N3 hypothesis (semantic
+memory covers verify's blind spot → SB joins IFBench's complement regime).
+
+**CAVEATS (don't over-read).** (1) 1 seed, n=32, SE≈0.09 (~3 tasks): every delta (+0.09…+0.13) is ~1 SE and
+the +0.031 interaction is ~1 task → SIGNAL, not significance. (2) **Confounded:** vs session-8 BOTH verify
+changed (oracle→self_both — repair is much WEAKER now, no_mem repair +0.094 vs +0.343) AND N3 was added; the
+flip may be partly "weaker repair leaves headroom for memory," not solely N3 semantic memory. Clean attribution
+needs a **(self_both, no-N3) control** (N3 is unconditional today → add `--no_semantic_reflect`). (3) repair
+fired 1/32 in cell D → D is essentially memory-carried; "complement" = memory no longer conflicts, not two big
+independent stacking gains. **Spend: $11.31 / 1 seed.** Runs (gitignored): `results/_n3both_sb_r{0,1}/`.
+**NEXT:** (a) ≥3 seeds on this 2×2; (b) the (self_both, no-N3) attribution control (~$5); (c) carry the
+`self_both`+N3 default into the other regimes' `ours_full` cells for the deployment-realistic lever map.
+
 ### 2026-06-05  (session 9 — critique-safety: the 0.375 was a LOOP BUG; monotone repair + exec-authoritative + N3 semantic-diff + routing-by-code-block)
 User scrutinized the precision-law result (SB exec+critique 0.375 < baseline 0.469): "a critique signal should at worst be IGNORED, never drag BELOW baseline." Correct — the drop was a **non-monotone repair-loop BUG**, not merely a noisy signal. All fixes unit-validated offline (zero spend), then confirmed with a billed n=32 A/B.
 

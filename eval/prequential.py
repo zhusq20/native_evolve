@@ -174,14 +174,14 @@ def main():
                     help="which methods get the repair loop: 'ours' (episodic/ours_mem/ours_full — "
                          "the headline; baselines stay single-shot), 'all', or a comma list (e.g. "
                          "'no_memory' for the apparatus-only ablation arm).")
-    ap.add_argument("--verify_mode", choices=["oracle", "self", "self_exec", "self_both"], default="self",
-                    help="signal that drives the repair loop. self (DEFAULT, deployment-realistic): "
-                         "DATASET-AGNOSTIC self_verify — routes on whether the ATTEMPT carries a code "
-                         "block (execute it) or not (LLM self-critique of the agent's own prompt; ~1 "
-                         "claude call/verify). self_exec: dataset-agnostic, EXECUTION ONLY (no critique). "
-                         "self_both: force exec+critique together (critique advisory on a clean run — "
-                         "the ablation that confirms critique can't drag below baseline). oracle: per-env "
-                         "verify() (dataset-AWARE ceiling/back-compat; pass explicitly for the oracle map).")
+    ap.add_argument("--verify_mode", choices=["oracle", "self", "self_exec", "self_both"], default="self_both",
+                    help="signal that drives the repair loop. self_both (DEFAULT, deployment-realistic): "
+                         "run BOTH dataset-agnostic channels — EXECUTION + LLM semantic self-critique — "
+                         "together; on a code task a clean execution stays AUTHORITATIVE so critique is "
+                         "ADVISORY (enriches the failure feedback, never flips ok->fail), so it can't drag "
+                         "below baseline. self: route to ONE channel by code-block (exec for code, else "
+                         "critique). self_exec: dataset-agnostic, EXECUTION ONLY (no critique). oracle: "
+                         "per-env verify() (dataset-AWARE ceiling/back-compat; pass explicitly for the oracle map).")
     ap.add_argument("--home", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
