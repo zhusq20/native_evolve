@@ -31,8 +31,41 @@ acc-vs-cost is fair. Baselines, all on the same `claude` CLI + same target model
 - Skills visible in `./skills/` with `.claude/skills` symlink. ✓
 - Parallelism: across (method,seed) runs only; a single online run is inherently sequential
   (prequential dependency). Confirmed isolated (per-run home/ledger).
+- **Session-8 apparatus (cross-benchmark; unit + online validated):** uniform `solve()` = single-shot +
+  conditional **repair** (`--repair_turns`) driven by a reference-free verify; gold-grounded
+  `env.evidence()` → **trace-grounded reflection** (killed the inverse-skill poison); **signature-keyed
+  episodic** + `repair_hint`; **rolling-window** consolidation gate; **dataset-blind `self_verify`**
+  (execution + self-critique, auto-routed; `--verify_mode oracle|self|self_exec`). New env: **IFBench**
+  (reference-free constraint verifiers). ✓
 
-## Results so far  (haiku target, n small, 2 seeds — SIGNALS not significance)
+## Results so far  (haiku target, n small, 1–2 seeds — SIGNALS not significance)
+
+### ⭐ CURRENT HEADLINE (session 8, 2026-06-05) — the four-regime TWO-AXIS LEVER MAP (1 seed each, preqEM)
+The apparatus carries TWO levers (reference-free **repair** + self-evolving **memory**); a 2×2
+(memory × repair) per regime shows WHICH lever a benchmark draws on — governed entirely by `verify`:
+
+| regime | env (n) | repair Δ (fires) | memory Δ (r0) | memory×repair | verify character |
+|---|---|---|---|---|---|
+| diverse codegen | SB (32) | **+0.34** (13/32) | +0.22 | **SUBSTITUTE** | partial (form) → big blind spot |
+| ref-free verifiable | IFBench (24) | +0.13/+0.17 (10/24) | +0.04 | **COMPLEMENT** | COMPLETE (verify==rubric) |
+| shared-proc QA | searchqa (24) | ~0 (1–2/24) | **+0.17** | — (repair idle) | weak (format) |
+| family multi-hop | HotpotQA (24) | 0 (0–1/24) | +0.04 | — (repair idle) | weak; bridge diverse |
+
+- **Axis 1 — repair fires/helps ∝ verify-VISIBILITY** (crashes/constraints visible → repair; QA semantic
+  errors invisible → idle). **Axis 2 — memory & repair STACK vs FIGHT ∝ verify-COMPLETENESS**: complete
+  verify (IFBench) → COMPLEMENT; large blind spot (SB) → SUBSTITUTE. The memory↔repair conflict IFF verify
+  is incomplete — the conflict IS the blind spot.
+- **Deployment-realism — the PRECISION LAW:** a DATASET-BLIND verify recovers the repair win iff its signal
+  is PRECISE — execution for code (SB self_exec **0.750** ≈ oracle 0.812), in-prompt constraints for
+  instruction-following (IFBench self **0.792** == oracle) — and BACKFIRES when noisy (SB exec+LLM-critique
+  **0.375**, below baseline 0.469). Fix = channel-routing `self_verify`. ⇒ **the lever map SURVIVES a
+  realistic verifier; repair's value is real, not an oracle artifact.**
+- Two robust wins: reference-free repair ~doubles SB gold-free (0.47→0.81); trace-grounded reflection
+  flipped SB memory from net-harmful (session-7) to +0.22. **All 1-seed signals — details in the session-8
+  changelog.** Raw runs: gitignored `results/_p3_*/`.
+
+> The session ≤7 tables below are HISTORICAL (single-shot harness, pre-repair, pre-trace-grounding) and are
+> SUPERSEDED by the lever map above; kept for the record.
 
 ### SearchQA (n=24)  — stationary, format-bound QA
 | method | EM | cost$ |
@@ -94,31 +127,23 @@ two regimes the literature names —
 > inverse. See session-7 changelog + `docs/` for the full SkillOpt investigation.
 
 ## Open questions / NEXT (priority order)
-**TOP PRIORITY (session 8 UPDATE): the apparatus is BUILT + unit-validated (zero claude spend);
-the remaining step is online validation (Phase 3, pending budget sign-off).** Session 7's SB-specific
-A/B/C/D plan was GENERALIZED into a cross-benchmark feedback taxonomy and implemented as Phases 0–2
-(see session-8 changelog). Mapping of the old plan → what shipped:
-- **A (repair loop) → DONE, GENERAL.** Not SB-only: a uniform `solve()` does single-shot + conditional
-  repair driven by a per-env REFERENCE-FREE `env.verify` (valid even at frozen-test; free when the
-  first attempt passes). `--repair_turns`; repair is ours-only headline + `--repair_methods no_memory`
-  ablation arm. verify() for searchqa/hotpotqa/SB, gold-leak-guarded.
-- **B (trace-grounded reflection) → DONE, GENERAL.** `env.evidence()` (gold-grounded structured diff:
-  full traceback + per-cell diff + formula-string flag for SB; normalized token diff for QA) replaces
-  the 240-char reason; `reflector.md` rewritten around one principle — "match the grader's expected
-  FORM" — of which "compute literals not formula strings" is one instance. Kills the inverse-skill poison.
-- **C (online rerun + cost curve) → Phase 3, NOT YET RUN (needs budget).** Now across THREE regimes
-  (searchqa shared-proc, SB diverse, HotpotQA families) to show the SAME mechanism helps regardless of
-  benchmark nature; + accuracy-vs-TOTAL-cost (ours learns-from-own-traces vs external offline).
-- **D (gate false-pos/neg) → DONE.** `verify.rolling_gate`: accumulate paired A/B across checkpoints,
-  power floor (`--gate_min_n`) + margin (`--gate_margin`) + non-dilution guard → kills false-POSITIVES;
-  reports base-failure rescue / saturation so a no-headroom val reads INCONCLUSIVE (keep as candidate)
-  instead of a silent false-REJECT.
-- Plus NEW (session 8): **signature-keyed episodic** + `repair_hint` (a fix for failure-mode S transfers
-  across lexically-unrelated tasks → turns "diverse / no-shared-procedure" into shared *failure*
-  knowledge), and **repair-trace reflection** (the reflector sees the error→fix path → learns to
-  pre-empt the failure).
-- Carried into Phase 3: complete the 6-method SB headline (ace/external), ≥3 seeds, IFBench (the
-  cleanest reference-free case — its verifiers ARE `env.verify`).
+**TOP PRIORITY (session-8 close, 2026-06-05): the cross-benchmark apparatus is BUILT + ONLINE-VALIDATED
+across 4 regimes; the two-axis lever map + the precision law are the deliverables (1 seed each — signal).**
+Phases 0–2 (repair loop, trace-grounded reflection, signature-episodic, rolling gate) + Phase 3 (the four
+2×2s) + the deployment-realism A/B (oracle vs dataset-blind `self_verify`) are all DONE (see Results
+headline + session-8 changelog). What's genuinely next:
+- **Re-run the full lever map under routed-`self_verify`** (not oracle) → publish the DEPLOYMENT-REALISTIC
+  lever map as the headline. (no_memory cells already ≈ oracle; still need the `ours_full` cells.)
+- **≥3 seeds** on the 2×2s → turn the magnitudes (SB interference −0.09 ≈1 SE; the memory deltas) from
+  signal into significance.
+- **Verify-completeness / semantic-memory fix on SB:** make memory learn the SEMANTIC layer (why the VALUE
+  is wrong, from gold-grounded evidence) to cover verify's blind spot → test if SB flips SUBSTITUTE→
+  COMPLEMENT (the IFBench pattern). This is the highest-insight follow-up.
+- **`repair_turns` 2–3 on IFBench** (multi-constraint satisfaction is iterative → expect higher yield).
+- **Cost honesty:** route `self_verify`'s critique-call cost into the per-task ledger row (currently
+  undercounts; ledger total is authoritative).
+- Carried: frozen-reuse headline + accuracy-vs-total-cost vs external; complete the 6-method SB headline
+  (ace/external) under the new apparatus.
 
 --- earlier list (session 4, partly addressed: frozen protocol + searchqa frozen now DONE) ---
 0. **Add ≥3 seeds to the SB 6-arm scout** to confirm the ordering (episodic ≫ rest at 1 seed,
