@@ -182,6 +182,17 @@ def main():
                          "below baseline. self: route to ONE channel by code-block (exec for code, else "
                          "critique). self_exec: dataset-agnostic, EXECUTION ONLY (no critique). oracle: "
                          "per-env verify() (dataset-AWARE ceiling/back-compat; pass explicitly for the oracle map).")
+    ap.add_argument("--agentic", action="store_true",
+                    help="agentic solve: the target runs MULTI-TURN with Read/Write/Bash/Skill in a "
+                         "per-task gold-isolated sandbox (writes, RUNS, and repairs its own code) "
+                         "instead of single-shot text. The harness repair loop is bypassed (the agent "
+                         "self-repairs) for clean attribution. Env must implement agentic_attempt (SB does).")
+    ap.add_argument("--agentic_max_turns", type=int, default=20,
+                    help="agentic: hard cap on agent turns per task (claude --max-turns; overflow exits).")
+    ap.add_argument("--native_skills", default="",
+                    help="comma list of skill names from engine/skills/ to install as DISCOVERABLE "
+                         "skills in every agent sandbox (e.g. self-verify-and-repair). The "
+                         "hand-authored procedural-skill arm / oracle ceiling; '' = bare-agentic ablation.")
     ap.add_argument("--home", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -203,6 +214,23 @@ def main():
     import self_verify as self_verify_mod  # noqa: E402
     from evolve import llm  # noqa: E402
     env = envs_pkg.get_env(args.env)
+
+    # NATIVE skills (role A as a discoverable skill): resolve the hand-authored SKILL.md text from the
+    # SOURCE engine/skills/ (NOT the per-run home, which starts empty) and pass to env.agentic_attempt.
+    def _load_native_skills(names):
+        out = []
+        for nm in [x.strip() for x in (names or "").split(",") if x.strip()]:
+            p = ENGINE_DIR / "skills" / nm / "SKILL.md"
+            if p.exists():
+                out.append((nm, p.read_text(encoding="utf-8")))
+            else:
+                sys.stderr.write("native skill not found: %s\n" % p)
+        return out
+    NATIVE_SKILLS = _load_native_skills(args.native_skills)
+    if args.agentic:
+        sys.stderr.write("[%s seed%d] AGENTIC mode: max_turns=%d native_skills=%s\n"
+                         % (args.method, args.seed, args.agentic_max_turns,
+                            [n for n, _ in NATIVE_SKILLS] or "(none)"))
 
     all_tasks = env.load_tasks(args.tasks)
     # SkillOpt-style disjoint splits: train (rollout evidence the method learns on), val/selection
@@ -318,6 +346,23 @@ def main():
         list of error->fix pairs used by repair-grounded reflection (Phase 2)."""
         base = env.build_prompt(task, mem_block)
         cost = [0.0]
+
+        if args.agentic and hasattr(env, "agentic_attempt"):
+            # Multi-turn agentic solve: the agent writes, RUNS, and repairs its own code in a
+            # gold-isolated sandbox, optionally using the native verify-repair skill. The harness
+            # repair loop is BYPASSED (repair_calls=0) so the gain is attributable to the agent +
+            # skill, not to monotone_repair. score()/the gate stay external + gold-isolated.
+            resp, c = env.agentic_attempt(task, mem_block, NATIVE_SKILLS,
+                                          args.agentic_max_turns, llm.call_claude, want_cost=True)
+            cost[0] += c
+            try:
+                ev = env.score(task, resp)
+            except Exception as exc:
+                sys.stderr.write("score error: %s\n" % exc)
+                ev = {"em": 0.0, "f1": 0.0, "sub_em": 0.0, "predicted_answer": ""}
+            if isinstance(ev, dict):
+                ev["_agentic"] = True
+            return resp, ev, {"repair_calls": 0, "signatures": [], "cost": cost[0], "trace": []}
 
         def _call(prompt):
             if want_cost:

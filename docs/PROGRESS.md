@@ -201,6 +201,59 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-05  (session 11 — #5 AGENTIC harness + the native verify-repair SKILL [code built, offline-validated, billed run pending])
+Acted on the design discussion: the single-shot harness STRUCTURALLY suppresses the skill tier — a
+*procedural* skill (run→observe→fix) is dead text when the agent has `allowedTools=Read`, no `cwd`, no
+execution surface (the session-7 Flaw 1). Built the agentic upgrade so a procedural skill can finally
+pay off, and hand-authored the expert verify-repair skill as a NATIVE (discoverable) Claude Code skill.
+Full design: **`docs/agentic_harness_design.md`**.
+
+**The three roles of "verify" (the load-bearing split).** Going agentic, `env.verify` splits into:
+(A) inference-time self-correction → moves INSIDE the agent, as a SKILL; (B) grader/scorer → stays
+EXTERNAL + gold-isolated (`env.score` unchanged); (C) promotion-gate validation → stays EXTERNAL (the
+paper's thesis). Only A internalizes. Internalizing B = teaching to the test; internalizing C = throwing
+away the contribution. Bonus: A via the agent's native `Bash` is genuinely dataset-agnostic, dissolving
+the session-8 "`verify` embeds dataset knowledge" critique — `self_verify` was scaffolding for a bodyless agent.
+
+**Built (all offline-validated, ZERO claude spend):**
+- **`engine/skills/self-verify-and-repair/SKILL.md`** — the hand-authored expert procedural skill
+  (role A), **GENERAL / dataset-agnostic** (per user direction — a native capability, not an SB hack):
+  derive a reference-free check from the task → pick the channel (EXECUTE runnable code / check explicit
+  CONSTRAINTS / check GROUNDING+form) → run → repair to the specific failure → cover the form-clean-but-
+  value-wrong blind spot. openpyxl formula-string poison is ONE worked example among code/instruction-
+  following/QA. The verify methodology lives ONLY in the skill (env prompt = task-spec + tools), so the
+  no-skill arm truly lacks it → clean ablation.
+- **`engine/evolve/llm.py`** — `call_claude` gained `permission_mode` / `max_turns` / `max_retries`
+  (single-shot path unchanged). Handles the two gotchas the guide surfaced: `--max-turns` EXITS NON-ZERO
+  on overflow (→ agentic uses `max_retries=1`, won't burn K sessions), and `acceptEdits` blocks `python`
+  in headless (→ agentic uses `bypassPermissions`).
+- **`eval/envs/spreadsheetbench.py`** — `agentic_attempt()`: per-task `/tmp` sandbox, copies ONLY the
+  first case's `*_init.xlsx` in (never `*_golden*`), installs named native skills into
+  `sandbox/.claude/skills/`, prompts write+run+verify `solution.py`, extracts final code (prefers
+  `solution.py`, else fenced block) for the UNCHANGED `score()` to grade on ALL cases.
+- **`eval/{prequential,run}.py`** — `--agentic` / `--agentic_max_turns 20` / `--native_skills <names>`;
+  in `solve()` the agent self-solves and the harness `monotone_repair` loop is BYPASSED (clean attribution).
+  Cost is one honest `total_cost_usd` per task (aggregates the whole multi-turn session; also fixes the old
+  `self_verify` critique cost leak).
+- **`eval/test_agentic.py`** — offline validation with a fake `call_claude`: GOLD ISOLATION (no `*golden*`
+  in the sandbox), skill install, `solution.py`-over-fenced extraction precedence, cost passthrough, prompt
+  skill-line/INPUT_PATH contract, graceful-empty→miss. **3/3 pass.** Flags + symlink discovery confirmed.
+
+**Experiment arms (clean attribution; tool-use is the ENV, available to all arms — the skill is the treatment):**
+| arm | `--agentic` | `--native_skills` | tests |
+|---|---|---|---|
+| agentic baseline | on | "" | does bare multi-turn tool-use alone move SB? |
+| + native skill (oracle ceiling) | on | self-verify-and-repair | does the hand-authored verify-repair skill give the SkillOpt-style jump? |
+| (later) learned skill | on | "" + ours_full | can memory→gate LEARN a skill approaching the native ceiling? (C1) |
+
+**Validity caveat (documented, mitigation ready):** soft gold-isolation (sandbox holds only the input;
+graded by running CODE on all cases) — `bypassPermissions`+Bash could technically `find` golden on this
+box; for the billed headline enable the bubblewrap OS sandbox (`--settings` `denyRead` the dataset dir),
+noted in the design doc. **NEXT:** billed smoke `no_memory` SB n=12 seed0, agentic, native_skills "" vs
+self-verify-and-repair — does the skill arm ≫ no-skill arm (the SkillOpt-style 0.4→0.8)? Then scale
+seeds + the ours_full learned-skill-vs-ceiling comparison. (Needs budget sign-off — multi-turn ⇒ higher
+$/task.)
+
 ### 2026-06-05  (session 10 — `self_both`+N3 made the default; SB 2×2 rerun → SUBSTITUTE flips to COMPLEMENT)
 Acted on the session-9 NEXT ("run the N3 probe; re-run the SB lever-map cell under the FIXED loop"). Made
 the deployment-realistic combo the **default verification** and reran the full SB make-or-break 2×2 under it.

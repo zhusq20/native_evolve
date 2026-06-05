@@ -435,3 +435,101 @@ def try_run(task, attempt):
         return (True, "")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+# --- AGENTIC solve (#5): the target runs MULTI-TURN with tools in a per-task sandbox, writing and
+# RUNNING and repairing its own code, instead of single-shot text. The native verify-repair skill
+# (role A: inference-time self-correction) is given to the agent as a DISCOVERABLE Claude Code skill.
+# Grading (env.score, role B) and the promotion gate (role C) stay external + gold-isolated. ---
+
+def _install_skills(sandbox, native_skills):
+    """Write each (name, SKILL.md text) into sandbox/.claude/skills/<name>/SKILL.md so claude -p
+    auto-discovers it from the cwd. native_skills = [] -> the agent has no procedural skill (the
+    bare-agentic ablation arm)."""
+    for name, md in (native_skills or []):
+        d = os.path.join(sandbox, ".claude", "skills", name)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "SKILL.md"), "w", encoding="utf-8") as f:
+            f.write(md)
+
+
+def _read_solution(sandbox):
+    """Prefer the file the agent wrote+tested (sandbox/solution.py) as the graded artifact."""
+    p = os.path.join(sandbox, "solution.py")
+    try:
+        if os.path.exists(p):
+            return (open(p, encoding="utf-8").read() or "").strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def build_agentic_prompt(task, mem, skill_names):
+    """The agentic prompt gives the TASK SPEC + tools only. The verify/repair METHODOLOGY lives in the
+    (general, dataset-agnostic) native skill, so the no-skill arm genuinely lacks it — clean ablation.
+    `skill_names` are referenced generically; the env never names a specific skill or its procedure."""
+    ap = _answer_position(task)
+    skills = [s for s in (skill_names or []) if s]
+    skill_line = (
+        "\nProject skills are available to you — invoke the relevant one(s): "
+        + ", ".join("`%s`" % s for s in skills) + ".\n" if skills else "\n")
+    body = (
+        _SYSTEM + "\n\n"
+        "You are working IN the current directory. The input workbook is the file `input.xlsx`.\n"
+        "Write your solution to a file named `solution.py` in this directory, using the EXACT "
+        "module-level variable names INPUT_PATH and OUTPUT_PATH, e.g.:\n"
+        "    import os\n"
+        "    INPUT_PATH = os.environ.get('INPUT_PATH', 'input.xlsx')\n"
+        "    OUTPUT_PATH = os.environ.get('OUTPUT_PATH', 'output.xlsx')\n"
+        "so it runs both for your own testing (`python solution.py`) and for grading.\n\n"
+        "# Instruction\n" + task.get("instruction", "") +
+        "\nInstruction type: " + str(task.get("instruction_type", "")) +
+        "\nExpected answer position: " + ap + "\n"
+        + skill_line +
+        "\nYou have Read, Write, Edit, and Bash (Python stdlib + openpyxl only; pandas is NOT "
+        "installed). Inspect the workbook and develop your solution. When you are confident in "
+        "`solution.py`, end your final message with its full contents in a single ```python ... ``` "
+        "block.\n"
+    )
+    return (mem + "\n\n" + body) if mem else body
+
+
+def agentic_attempt(task, mem, native_skills, max_turns, call_claude, want_cost=True):
+    """Multi-turn agentic solve. Returns (fenced_code, cost) [or fenced_code if not want_cost].
+
+    GOLD ISOLATION (role B validity): the sandbox holds ONLY the first case's *_init.xlsx (copied in
+    as input.xlsx); the *_golden* files are never named or copied. The agent is graded by running its
+    CODE on ALL cases (env.score), so seeing one input cannot be memorized into a pass. (Hard OS-level
+    read-isolation of the dataset dir is the documented next step for the billed headline.)"""
+    cases = _test_cases(_task_dir(task))
+    sandbox = tempfile.mkdtemp(prefix="sb_agent_")
+    cost = 0.0
+    try:
+        if cases:
+            shutil.copy(cases[0][0], os.path.join(sandbox, "input.xlsx"))  # INPUT only, never golden
+        _install_skills(sandbox, native_skills)
+        prompt = build_agentic_prompt(task, mem, [n for n, _ in (native_skills or [])])
+        text = ""
+        try:
+            r = call_claude(
+                prompt,
+                allowed_tools="Read,Write,Edit,Bash,Skill",
+                add_dir=sandbox,
+                cwd=sandbox,
+                setting_sources="user",        # skills load from cwd regardless; avoid project hooks
+                permission_mode="bypassPermissions",   # acceptEdits would block `python` in headless
+                max_turns=max_turns,
+                max_retries=1,                 # --max-turns overflow exits non-zero; don't burn retries
+                timeout=1200,
+                return_cost=True,
+            )
+            text, c = r if isinstance(r, tuple) else (r, 0.0)
+            cost += c
+        except Exception as exc:               # turn-cap overflow / transient: still read solution.py
+            sys.stderr.write("agentic target error: %s\n" % exc)
+        code = _read_solution(sandbox) or _extract_code(text)
+        resp = ("```python\n" + code + "\n```") if code.strip() else ""
+        return (resp, cost) if want_cost else resp
+    finally:
+        if os.environ.get("NATIVE_EVOLVE_KEEP_SANDBOX") != "1":
+            shutil.rmtree(sandbox, ignore_errors=True)

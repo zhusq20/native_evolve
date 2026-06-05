@@ -21,7 +21,8 @@ CODE_DIR = pathlib.Path(__file__).resolve().parents[1]
 def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
             protocol="prequential", test_n=0, verify_n=18, stratify_key="", induce_every=16,
             deploy_workers=1, acquire_mode="sequential", learn_workers=4,
-            repair_turns=0, repair_methods="ours", verify_mode="self_both"):
+            repair_turns=0, repair_methods="ours", verify_mode="self_both",
+            agentic=False, agentic_max_turns=20, native_skills=""):
     home = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "home"
     home.mkdir(parents=True, exist_ok=True)
     out = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "tasks.jsonl"
@@ -37,8 +38,11 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
         "--acquire_mode", acquire_mode, "--learn_workers", str(learn_workers),
         "--repair_turns", str(repair_turns), "--repair_methods", repair_methods,
         "--verify_mode", verify_mode,
+        "--agentic_max_turns", str(agentic_max_turns), "--native_skills", native_skills,
         "--home", str(home), "--out", str(out),
     ]
+    if agentic:
+        cmd.append("--agentic")
     subprocess.run(cmd, env=env, check=True)
     return [json.loads(l) for l in out.read_text().splitlines() if l.strip()]
 
@@ -96,6 +100,15 @@ def main():
                          "semantic self-critique; clean execution AUTHORITATIVE so critique is advisory), "
                          "self (route to one channel by code-block), self_exec (exec channel only), or "
                          "oracle (per-env, dataset-AWARE ceiling; pass explicitly to reproduce the oracle map).")
+    ap.add_argument("--agentic", action="store_true",
+                    help="agentic solve: target runs multi-turn with Read/Write/Bash/Skill in a "
+                         "gold-isolated per-task sandbox (writes+runs+repairs its own code). Env must "
+                         "implement agentic_attempt (SpreadsheetBench does).")
+    ap.add_argument("--agentic_max_turns", type=int, default=20,
+                    help="agentic: hard cap on agent turns per task (claude --max-turns).")
+    ap.add_argument("--native_skills", default="",
+                    help="comma list of engine/skills/ names to install as discoverable skills in the "
+                         "agent sandbox (e.g. self-verify-and-repair). '' = bare-agentic ablation.")
     args = ap.parse_args()
 
     methods = [m.strip() for m in args.methods.split(",") if m.strip()]
@@ -113,7 +126,8 @@ def main():
         return run_one(args.tasks, args.n, m, s, args.outdir, args.train_n, args.env,
                        args.protocol, args.test_n, args.verify_n, args.stratify_key,
                        args.induce_every, deploy_workers, args.acquire_mode, args.learn_workers,
-                       args.repair_turns, args.repair_methods, args.verify_mode)
+                       args.repair_turns, args.repair_methods, args.verify_mode,
+                       args.agentic, args.agentic_max_turns, args.native_skills)
     if args.workers <= 1:
         for m, s in jobs:
             results[m][s] = _call(m, s)

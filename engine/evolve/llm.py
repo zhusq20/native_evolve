@@ -40,25 +40,36 @@ def call_claude(
     setting_sources="user",
     timeout=600,
     return_cost=False,
+    permission_mode="acceptEdits",
+    max_turns=None,
+    max_retries=None,
 ):
     """Shell out to `claude -p` with robust retries. Returns the result string (or
     (result, cost_usd) when return_cost=True). Retries transient failures — non-zero exit,
     timeout, empty stdout — with exponential backoff + jitter (rate limits / overload /
     flaky network are the common causes during a 64-wide deploy). Tunable via env:
-    NATIVE_EVOLVE_MAX_RETRIES (default 5), NATIVE_EVOLVE_RETRY_BASE seconds (default 2.0)."""
+    NATIVE_EVOLVE_MAX_RETRIES (default 5), NATIVE_EVOLVE_RETRY_BASE seconds (default 2.0).
+
+    Agentic use (multi-turn tool loop): pass permission_mode='bypassPermissions' (so Bash can
+    run `python`), max_turns=K (claude --max-turns; EXITS NON-ZERO on overflow), and a small
+    max_retries (e.g. 1) so a turn-cap overflow doesn't burn K expensive sessions. total_cost_usd
+    from --output-format json already aggregates the whole multi-turn session."""
     cmd = [
         config.CLAUDE_BIN, "-p", prompt,
         "--output-format", "json",
         "--setting-sources", setting_sources,
-        "--permission-mode", "acceptEdits",
+        "--permission-mode", permission_mode,
         "--allowedTools", allowed_tools,
     ]
+    if max_turns:
+        cmd += ["--max-turns", str(max_turns)]
     if add_dir:
         cmd += ["--add-dir", str(add_dir)]
     if config.MODEL:
         cmd += ["--model", config.MODEL]
 
-    max_retries = int(os.environ.get("NATIVE_EVOLVE_MAX_RETRIES", "5"))
+    if max_retries is None:
+        max_retries = int(os.environ.get("NATIVE_EVOLVE_MAX_RETRIES", "5"))
     base = float(os.environ.get("NATIVE_EVOLVE_RETRY_BASE", "2.0"))
     # NATIVE_EVOLVE_RETRY_FIXED: if set, use a CONSTANT retry interval (seconds) instead of
     # exponential backoff — e.g. 1000 retries x 10s to patiently ride out long rate-limit outages.
