@@ -134,6 +134,11 @@ def main():
                     help="which methods get the repair loop: 'ours' (episodic/ours_mem/ours_full — "
                          "the headline; baselines stay single-shot), 'all', or a comma list (e.g. "
                          "'no_memory' for the apparatus-only ablation arm).")
+    ap.add_argument("--verify_mode", choices=["oracle", "self"], default="oracle",
+                    help="signal that drives the repair loop. oracle: per-env verify() (dataset-aware "
+                         "reference-free check — the mechanism's ceiling). self: DATASET-AGNOSTIC "
+                         "self_verify (generic execution + LLM self-critique of the agent's own "
+                         "prompt; the deployment-realistic check — costs 1 claude call/verify).")
     ap.add_argument("--home", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -152,6 +157,7 @@ def main():
     sys.path.insert(0, str(pathlib.Path(__file__).parent))
     import external_opt  # noqa: E402
     import envs as envs_pkg  # noqa: E402
+    import self_verify as self_verify_mod  # noqa: E402
     from evolve import llm  # noqa: E402
     env = envs_pkg.get_env(args.env)
 
@@ -250,6 +256,12 @@ def main():
             s += "\n\n## A fix that worked on a past similar failure (adapt, don't copy)\n" + hint
         return s
 
+    def _do_verify(task, resp):
+        """Route the repair-loop check: oracle (per-env, dataset-aware) or self (dataset-agnostic)."""
+        if args.verify_mode == "self":
+            return self_verify_mod.self_verify(task, resp, env)
+        return envs_pkg.run_verify(env, task, resp)
+
     def solve(task, mem_block, want_cost=False):
         """Single-shot target call + up to REPAIR_TURNS CONDITIONAL repair rounds. A round fires
         only when env.verify (REFERENCE-FREE; reads no gold) rejects the attempt, so the loop is
@@ -274,7 +286,7 @@ def main():
         sigs, trace, ncalls = [], [], 0
         for _ in range(REPAIR_TURNS):
             try:
-                vr = envs_pkg.run_verify(env, task, resp)
+                vr = _do_verify(task, resp)
             except Exception:
                 vr = None
             if not vr or vr.get("ok"):

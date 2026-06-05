@@ -21,7 +21,7 @@ CODE_DIR = pathlib.Path(__file__).resolve().parents[1]
 def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
             protocol="prequential", test_n=0, verify_n=18, stratify_key="", induce_every=16,
             deploy_workers=1, acquire_mode="sequential", learn_workers=4,
-            repair_turns=0, repair_methods="ours"):
+            repair_turns=0, repair_methods="ours", verify_mode="oracle"):
     home = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "home"
     home.mkdir(parents=True, exist_ok=True)
     out = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "tasks.jsonl"
@@ -36,6 +36,7 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
         "--deploy_workers", str(deploy_workers),
         "--acquire_mode", acquire_mode, "--learn_workers", str(learn_workers),
         "--repair_turns", str(repair_turns), "--repair_methods", repair_methods,
+        "--verify_mode", verify_mode,
         "--home", str(home), "--out", str(out),
     ]
     subprocess.run(cmd, env=env, check=True)
@@ -90,6 +91,9 @@ def main():
     ap.add_argument("--repair_methods", default="ours",
                     help="which methods get repair: 'ours' (headline; baselines single-shot), "
                          "'all', or a comma list (e.g. 'no_memory' for the apparatus-only ablation).")
+    ap.add_argument("--verify_mode", choices=["oracle", "self"], default="oracle",
+                    help="repair-loop signal: oracle (per-env, dataset-aware) or self "
+                         "(DATASET-AGNOSTIC self_verify: generic exec + LLM self-critique).")
     args = ap.parse_args()
 
     methods = [m.strip() for m in args.methods.split(",") if m.strip()]
@@ -107,7 +111,7 @@ def main():
         return run_one(args.tasks, args.n, m, s, args.outdir, args.train_n, args.env,
                        args.protocol, args.test_n, args.verify_n, args.stratify_key,
                        args.induce_every, deploy_workers, args.acquire_mode, args.learn_workers,
-                       args.repair_turns, args.repair_methods)
+                       args.repair_turns, args.repair_methods, args.verify_mode)
     if args.workers <= 1:
         for m, s in jobs:
             results[m][s] = _call(m, s)

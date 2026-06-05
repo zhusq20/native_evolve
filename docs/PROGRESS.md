@@ -162,6 +162,25 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-05  (session 8 — deployment-realistic self_verify: removing dataset knowledge from verify)
+Addressed a VALIDITY critique (user): the per-env `verify()` functions embed dataset knowledge a real
+deployment lacks — IFBench's pre-parsed rubric, SB's answer_position, QA format heuristics, and the
+env-name DISPATCH itself (deployment doesn't know which dataset a task is from). Implemented a
+dataset-agnostic `eval/self_verify.py` (NO env dispatch, NO gold, NO answer key):
+- **Channel 1 — generic execution** (`env.try_run`, optional): run the candidate on its INPUT only
+  (never golden/answer_position), report crashes + formula-strings the code WROTE (found by input↔output
+  diff — general openpyxl reasoning). SB implements it; QA envs don't (no code to run).
+- **Channel 2 — LLM self-critique**: ONE claude call — the agent lists the explicit, objectively-checkable
+  requirements it violated in its OWN prompt+attempt. Fully general, reference-free, IMPERFECT (the
+  realistic degradation), and NOT free (1 call/check — the honest cost of a general verify).
+`--verify_mode {oracle,self}` selects it (oracle = per-env ceiling, default/back-compat; self =
+deployment-realistic). Wired through `solve()` + `run.py`; unit-validated (channel logic; SB try_run
+never opens golden; QA→critique-only). **Triage:** the strongest result — SB repair via EXECUTION — is
+ALREADY deployment-realistic (a coding agent runs its own code); the oracle borrowing was mainly IFBench
+(rubric) + QA heuristics. **NEXT (needs budget): A/B oracle vs self on IFBench (most-affected) + SB** to
+measure the oracle artifact — does the lever map survive a dataset-blind verifier? New: `eval/self_verify.py`,
+SB `try_run`, `--verify_mode`.
+
 ### 2026-06-05  (session 8 — Phase 3 IFBench: 4th regime reveals a SECOND axis → the two-axis lever map)
 Built a new **IFBench/IFEval env** (`eval/envs/ifbench.py`): reference-free constraint verifiers,
 stdlib-only reimplementation of 23 IFEval instruction types (skipped `language:response_language`

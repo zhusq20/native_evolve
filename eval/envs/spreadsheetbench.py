@@ -304,3 +304,53 @@ def verify(task, attempt):
         return {"ok": True, "signature": "", "feedback": ""}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def try_run(task, attempt):
+    """GENERIC, dataset-agnostic execution probe for self_verify (no answer_position, no golden).
+    Runs the candidate on the task INPUT — a coding agent runs its own code in any runtime — and
+    reports (a) a crash, or (b) formula STRINGS the code WROTE, found by diffing input vs output
+    (general openpyxl reasoning, not knowledge of which cells are graded). Returns (ran_ok, feedback);
+    ran_ok=None when there is no workbook to run against. NEVER opens the *_golden* file."""
+    code = _extract_code(attempt)
+    if not code.strip() or "```" not in (attempt or ""):
+        return (False, "No ```python``` code block found; return one self-contained fenced block.")
+    cases = _test_cases(_task_dir(task))
+    if not cases:
+        return (None, "")
+    init = cases[0][0]                                # INPUT only — never the golden
+    tmp = tempfile.mkdtemp(prefix="sbtr_")
+    try:
+        pred = os.path.join(tmp, "out.xlsx")
+        ok_exec, err = _exec.run_generated_code(code, init, pred, timeout=60)
+        if not ok_exec:
+            return (False, "Your code crashed when run on the input:\n" + (err or "")[:900])
+        try:                                          # input/output diff: did the code write formula strings?
+            wi = openpyxl.load_workbook(init, data_only=False)
+            wo = openpyxl.load_workbook(pred, data_only=False)
+            wrote_formula = []
+            for sn in wo.sheetnames:
+                wso = wo[sn]
+                wsi = wi[sn] if sn in wi.sheetnames else None
+                for row in wso.iter_rows(max_row=min(wso.max_row, 400)):
+                    for c in row:
+                        v = c.value
+                        if isinstance(v, str) and v.startswith("="):
+                            iv = wsi[c.coordinate].value if wsi is not None else None
+                            if v != iv:               # the code itself wrote this formula string
+                                wrote_formula.append("%s!%s" % (sn, c.coordinate))
+                    if len(wrote_formula) >= 6:
+                        break
+                if len(wrote_formula) >= 6:
+                    break
+            wi.close(); wo.close()
+            if wrote_formula:
+                return (False, "Your code wrote Excel FORMULA STRINGS into %s. openpyxl stores '=...' "
+                        "as literal text and never computes it, so any reader of the file sees the "
+                        "formula text (or None), not the value. Compute the values in Python and write "
+                        "the literal results." % ", ".join(wrote_formula[:6]))
+        except Exception:
+            pass
+        return (True, "")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
