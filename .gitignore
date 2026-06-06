@@ -12,6 +12,7 @@ eval/data/math_hf/
 # Per-run working dirs (transcripts/ledgers): bulky + reproducible.
 # We KEEP the results of record: tasks.jsonl, curve.csv, summary.json, *.svg.
 results/*/runs/*/home/
+results/**/home/                 # deeper nesting (e.g. per-family: results/<exp>/<family>/runs/*/home/)
 
 # Scratch / de-risking runs (pilots, smokes, A/B diagnostics) — not results of record.
 results/_*/

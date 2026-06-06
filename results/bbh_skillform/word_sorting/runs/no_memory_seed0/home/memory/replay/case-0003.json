@@ -1,6 +1,0 @@
-{
-  "id": "case-0003",
-  "scope": "csv-header-check",
-  "task": "A CSV has these lines:\nLine 1: ,,\nLine 2: product,qty,price\nLine 3: pen,10,2\nLine 4: book,3,7\nLine 1 is an empty separator row; the header is line 2. Compute qty*price for 'book'. Reply with ONLY the number, nothing else.",
-  "expect_substring": "21"
-}
