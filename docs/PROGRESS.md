@@ -218,11 +218,13 @@ QA is a dead end. Probe: `results/_hover_probe/`.
 **[UPDATE — AIME-2025 probe (reused the `math` env, n=30): no_memory EM=0.767 (23/30).]** Even hard
 competition math NEAR-CEILINGS haiku-4.5, and AIME is **not reuse-structured** (diverse problems, no shared
 procedure) + tiny n → triple-strike, not viable.
-**[UPDATE 2 — ZebraLogic probe (built `eval/envs/zebra.py`, logic-grid puzzles, n=88 across sizes 2x2..5x5,
-WildEval filled solutions, `test_zebra_env.py` 15/15): no_memory puzzle-EM=1.000 — even 5x5 (which stumps
-GPT-4o). Manually verified one 5x5: haiku produced genuine constraint-propagation reasoning + the EXACT
-25-cell gold grid (scorer correct; the model really solves them, or memorized this 2024 public set — either
-way ceiling).]**
+**[UPDATE 2 — ZebraLogic probe (built `eval/envs/zebra.py`, logic-grid puzzles, WildEval filled solutions,
+`test_zebra_env.py` 15/15). Tested the FULL difficulty gradient 2x2→6x6 (the dataset max; n=172). no_memory
+puzzle-EM: everything ≤5x5 = **1.00** (verified genuine: one 5x5 → exact 25-cell grid via real constraint
+reasoning); 6x4/6x5/5x6 = 0.92; **6x6 (max) = 0.67** (cell-F1 0.87 — failures are NEAR-MISSES, 1-2 cells off).
+So haiku-4.5 nearly solves the whole benchmark that stumps GPT-4o; headroom exists ONLY at the absolute
+hardest size. **ZebraLogic 6x6 IS a usable headroom family** (0.67, ideal single-procedure reuse, recoverable
+near-miss failures, ~40 puzzles available) — the best-STRUCTURED headroom benchmark found, though thin n.]**
 **FIVE-PROBE META-FINDING (CONCLUSIVE): haiku-4.5 is too capable for standard benchmarks to leave clean
 headroom — knowledge QA, competition math (AIME 0.767), AND logic-grid puzzles (Zebra 1.000) all CEILING;
 HoVer FLOORS. The ONLY reliable headroom + reuse-structure is tedious MECHANICAL-TEDIUM symbol manipulation
