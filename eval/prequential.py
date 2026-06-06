@@ -198,6 +198,12 @@ def main():
                     help="comma list of skill names from engine/skills/ to install as DISCOVERABLE "
                          "skills in every agent sandbox (e.g. self-verify-and-repair). The "
                          "hand-authored procedural-skill arm / oracle ceiling; '' = bare-agentic ablation.")
+    ap.add_argument("--retrieval", choices=["lexical", "agentic"], default="agentic",
+                    help="how distilled memory is RETRIEVED for ours_mem/ours_full. agentic (DEFAULT, "
+                         "native Claude Code paradigm): present a plain-text INDEX of memory one-liners "
+                         "and let the MODEL select the relevant [id]s (one extra claude call/task, billed "
+                         "to the ledger). lexical: deterministic bag-of-words top-k overlap score (the "
+                         "pre-2026-06-06 behavior; pass explicitly to reproduce the old runs).")
     ap.add_argument("--home", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -275,10 +281,18 @@ def main():
             t += rec.get("output_tokens", 0)
         return c, t
 
+    def retrieve_distilled(q):
+        """Distilled-memory retrieval, selectable via --retrieval. agentic = native paradigm
+        (model selects from the index); lexical = bag-of-words top-k. Returns (block, ids).
+        Used by BOTH inject() and the gate's base_block so the gate A/B compares like with like."""
+        if args.retrieval == "agentic":
+            return retrieve.select_and_block_agentic(q)
+        return retrieve.select_and_block(q)
+
     def base_block(t):
         """Episodic + distilled injection — the episodic-first baseline the gate must beat."""
         epi = episodic.exemplar_block(t["question"])
-        dis, _ = retrieve.select_and_block(t["question"])
+        dis, _ = retrieve_distilled(t["question"])
         return "\n\n".join(x for x in (epi, dis) if x)
 
     def consolidate(idx):
@@ -420,10 +434,10 @@ def main():
         if args.method == "episodic":
             mem = episodic.exemplar_block(q)                    # raw past-success exemplars (episodic-only)
         elif args.method == "ours_mem":
-            mem, injected_ids = retrieve.select_and_block(q)    # distilled top-k memory only
+            mem, injected_ids = retrieve_distilled(q)           # distilled memory (lexical|agentic)
         elif args.method == "ours_full":
             epi = episodic.exemplar_block(q)                    # episodic exemplars
-            dis, injected_ids = retrieve.select_and_block(q)    # distilled top-k memory
+            dis, injected_ids = retrieve_distilled(q)           # distilled memory (lexical|agentic)
             skl = retrieve.skills_block(q)                      # gated, verified skills (often none)
             mem = "\n\n".join(x for x in (epi, dis, skl) if x)
         elif args.method == "ace":

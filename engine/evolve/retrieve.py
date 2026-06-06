@@ -6,7 +6,7 @@ retriever later without touching the rest of the pipeline.
 """
 import re
 
-from . import config, store
+from . import config, store, llm
 
 
 def _tokens(text):
@@ -65,6 +65,74 @@ def select_and_block(prompt, k=None):
     cannot rely on the agent echoing ids back.
     """
     selected = select(prompt, k)
+    if not selected:
+        return "", []
+    return _render(selected), [b["id"] for b in selected]
+
+
+# --- agentic-index retrieval: the MODEL selects from a presented index (native paradigm) ---
+# Mirrors how Claude Code's own memory works: load a plain-text INDEX of one-line items, let the
+# model decide which are relevant, rather than a lexical-overlap score deciding. Our distilled
+# bullets are already terse one-liners, so for them the index entry IS the body — the change is
+# purely the SELECTION mechanism (model judgement vs `score()`'s bag-of-words). Single-shot
+# compatible: one cheap `claude` call returns the relevant [id]s (billed to the ledger via llm),
+# then we inject those items' bodies. Crucially it PRESERVES the (block, injected_ids) contract,
+# so curate.credit + the promotion gate keep their deterministic signal unchanged.
+
+_SELECT_HEADER = (
+    "You are an assistant's MEMORY RETRIEVER. Below is an INDEX of lessons distilled from past "
+    "tasks, each tagged with an [id]. Select ONLY the lessons GENUINELY relevant to the NEW TASK "
+    "and likely to help solve it — at most %d. Prefer precision: if a lesson is not clearly "
+    "applicable, leave it out; if none apply, select none. Reply with ONLY a JSON object: "
+    '{"ids": ["<id>", ...]} with ids in priority order (most useful first), no prose.'
+)
+
+
+def _index_block(bullets):
+    return "\n".join("- [{}] {}".format(b["id"], b.get("content", "")) for b in bullets)
+
+
+def select_agentic(prompt, k=None, max_index=200):
+    """Model-driven selection over the active-memory index (native agentic-index paradigm).
+
+    Returns the model-selected active bullets (capped at k, in the model's priority order). On
+    ANY failure — empty store, claude/parse error, no valid ids — returns [] so the task falls
+    back to no-memory rather than crashing. The selection claude call is auto-logged to the
+    per-run ledger by llm.call_claude, so its cost is counted honestly."""
+    k = k or config.RETRIEVE_TOPK
+    active = [b for b in store.load() if b.get("status") == "active" and b.get("content")]
+    if not active:
+        return []
+    # Defensive cap so a huge store doesn't blow the selection prompt; keep the most-proven first
+    # so the cap is principled (net helpful), not arbitrary truncation.
+    if len(active) > max_index:
+        active = sorted(active, key=lambda b: b.get("helpful", 0) - b.get("harmful", 0),
+                        reverse=True)[:max_index]
+    by_id = {b["id"]: b for b in active}
+    msg = ((_SELECT_HEADER % k) + "\n\nNEW TASK:\n" + (prompt or "")[:4000]
+           + "\n\nMEMORY INDEX:\n" + _index_block(active) + "\n")
+    try:
+        out = llm.call_claude(msg)
+    except Exception:
+        return []
+    obj = llm.extract_json(out) or {}
+    raw = obj.get("ids") if isinstance(obj, dict) else None
+    if not isinstance(raw, list):
+        return []
+    seen, chosen = set(), []
+    for i in raw:
+        sid = str(i).strip().strip("[]").strip()
+        if sid in by_id and sid not in seen:
+            seen.add(sid)
+            chosen.append(by_id[sid])
+        if len(chosen) >= k:
+            break
+    return chosen
+
+
+def select_and_block_agentic(prompt, k=None):
+    """Agentic-index analogue of select_and_block: (rendered block, injected ids)."""
+    selected = select_agentic(prompt, k)
     if not selected:
         return "", []
     return _render(selected), [b["id"] for b in selected]

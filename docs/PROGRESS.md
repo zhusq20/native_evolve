@@ -24,6 +24,8 @@ acc-vs-cost is fair. Baselines, all on the same `claude` CLI + same target model
 
 ## Status (what works, validated)
 - Engine: store / retrieve / curate(deterministic) / reflect(claude) / promote+gate(claude). ✓
+  **Retrieval default = `agentic` (native agentic-index: model selects from a plain-text index)** as of
+  session 13; the lexical bag-of-words top-k is still available via `--retrieval lexical`.
 - Deployment: Claude Code hooks (UserPromptSubmit→inject memory, Stop→reflect, recursion-guarded). ✓
 - Eval harness: prequential runner, 4 baselines, `--workers` parallel across runs, SVG plots. ✓
 - Envs: searchqa ✓, spreadsheetbench ✓ (codegen+exec+official cell-compare), hotpotqa ✓
@@ -201,6 +203,53 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-06  (session 13 — IFBench ours-vs-baseline headline + retrieval switched to the NATIVE agentic-index paradigm)
+Two threads: (1) the requested clean `ours_full` vs `no_memory` headline on a NEW non-math benchmark
+(no component ablations); (2) per the user, replaced the lexical top-k memory retriever with Claude
+Code's OWN native memory paradigm.
+
+**1. IFBench headline (ours_full vs vanilla, prequential n=24 seed0, haiku, LEXICAL retrieval).**
+| method | preqEM | F1 | 1stH | 2ndH | cost$ | bullets | skills |
+|---|---|---|---|---|---|---|---|
+| no_memory | 0.708 | 0.757 | 0.750 | 0.667 | 0.34 | 0 | 0 |
+| **ours_full** | **0.792** | **0.840** | 0.750 | **0.833** | 2.57 | 10 | 0 |
+→ **Memory +0.083 EM/F1** — rescued 3 (idx 15,16,18), broke 1 (idx 23) = **+2/24**. **Clean learning
+fingerprint:** identical 1st-half (0.750), ours pulls ahead 2nd-half (**0.833 vs 0.667**, all 3 rescues
+back-half). Lift is from **distilled+episodic, NOT the gated skill** (rolling gate REJECTED @15, broke 2
+rescued 0 → active_skills=0 — the usual conservative-gate story). Cost **7.6×** (~5 calls/task: solve +
+repair[5/24] + self_both critique + reflect). **CAVEAT:** 1 seed, n=24, SE≈0.083 ⇒ +0.083 ≈ 1 SE =
+SIGNAL not significance. This is the clean vanilla(single-shot, no repair) vs full-apparatus contrast, so
+NOT comparable to session-8's IFBench 2×2 (which gave no_memory a repair loop). Results + figs:
+`results/ifbench_headline/`.
+
+**2. Retrieval → native agentic-index paradigm (researched, built, offline-validated).** Researched (via
+the claude-code-guide agent) how Claude Code's OWN memory retrieval works: it uses **NO embedding / vector
+/ lexical scoring** — every built-in memory subsystem (CLAUDE.md hierarchy, MEMORY.md auto-memory, the
+`memory_20250818` tool, managed-agents store) is uniformly **"load a plain-text INDEX, let the model
+agentically decide what to read"**; only optional third-party MCP servers add embedding/BM25/graph
+retrieval. Our engine's lexical bag-of-words top-k (`retrieve.select`, score = overlap + 0.1·helpful −
+0.5·harmful) is therefore a **non-native paradigm bolted onto a native-memory project**.
+- **BUILT** `retrieve.select_agentic` / `select_and_block_agentic`: present the active-memory index
+  (`- [id] <one-liner>`); a single cheap `claude` call returns the relevant `[id]`s (MODEL selection, not
+  a lexical score); inject those bodies. Single-shot compatible; **PRESERVES the `(block, injected_ids)`
+  contract** so `curate.credit` + the promotion gate keep their deterministic signal; **fail-safe** to
+  no-memory on any error (empty store / claude error / unparseable / no valid ids); **ledger-billed**.
+- **WIRED** `--retrieval {lexical,agentic}`, **DEFAULT now `agentic`** (per user; pass `lexical` to
+  reproduce pre-2026-06-06 runs). Routed BOTH `inject()` and the gate's `base_block` through one helper
+  so the gate's A/B compares like-with-like.
+- **OFFLINE-VALIDATED 14/14** (`eval/test_agentic_retrieval.py`, fake llm — priority order, cap-k,
+  invalid/inactive/dup filtering, empty-selection, unparseable / non-list / empty-store(no wasted call) /
+  llm-error fail-safes, prompt embeds task+index, excludes archived). **ZERO claude spend.**
+- **Scope/notes:** applied to the eval harness `inject()`; the live hook adapter (`hook_user_prompt_submit`)
+  + codex runner still use lexical `context_block` (deployment behavior unchanged) — follow-up. Our
+  distilled bullets are already terse one-liners so index-entry == body; a deeper V2 (inject the linked
+  episode as the on-demand "body") and a true `--agentic` Read-on-demand variant are noted but unbuilt.
+Files: `engine/evolve/retrieve.py`, `eval/{prequential,run,test_agentic_retrieval}.py`.
+**NEXT (needs budget sign-off):** the headline A/B — re-run `ours_full` IFBench n=24 seed0 with
+`--retrieval agentic` vs the lexical **0.792** (shared `no_memory` **0.708**) → does native agentic-index
+selection beat lexical top-k, and at what cost delta? Then ≥3 seeds; carry to **SB** (where lexical is
+weakest on diverse, low-overlap tasks — highest expected gain); optionally switch the live hook.
+
 ### 2026-06-06  (session 12 — agentic skill billed verdict + micro-batch parallelism + MATH env + the "is batching native?" analysis)
 Three threads: closed the agentic-skill side-experiment, built the parallelism+memory tradeoff knob, and
 started the cross-benchmark generalization expansion.

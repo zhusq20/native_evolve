@@ -22,7 +22,8 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
             protocol="prequential", test_n=0, verify_n=18, stratify_key="", induce_every=16,
             deploy_workers=1, acquire_mode="sequential", learn_workers=4,
             repair_turns=0, repair_methods="ours", verify_mode="self_both",
-            agentic=False, agentic_max_turns=20, native_skills="", batch_size=1):
+            agentic=False, agentic_max_turns=20, native_skills="", batch_size=1,
+            retrieval="agentic"):
     home = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "home"
     home.mkdir(parents=True, exist_ok=True)
     out = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "tasks.jsonl"
@@ -39,7 +40,7 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
         "--repair_turns", str(repair_turns), "--repair_methods", repair_methods,
         "--verify_mode", verify_mode,
         "--agentic_max_turns", str(agentic_max_turns), "--native_skills", native_skills,
-        "--batch_size", str(batch_size),
+        "--batch_size", str(batch_size), "--retrieval", retrieval,
         "--home", str(home), "--out", str(out),
     ]
     if agentic:
@@ -113,6 +114,11 @@ def main():
     ap.add_argument("--batch_size", type=int, default=1,
                     help="bounded-staleness parallel prequential: solve B tasks concurrently per memory "
                          "snapshot, learn between batches (speedup ~B, memory staleness <= B). 1 = sequential.")
+    ap.add_argument("--retrieval", choices=["lexical", "agentic"], default="agentic",
+                    help="distilled-memory retrieval for ours_mem/ours_full. agentic (DEFAULT, native "
+                         "Claude Code paradigm): the MODEL selects relevant items from a presented index "
+                         "(+1 claude call/task, ledger-billed). lexical: bag-of-words top-k (pre-2026-06-06 "
+                         "behavior; pass explicitly to reproduce older runs).")
     args = ap.parse_args()
 
     methods = [m.strip() for m in args.methods.split(",") if m.strip()]
@@ -131,7 +137,8 @@ def main():
                        args.protocol, args.test_n, args.verify_n, args.stratify_key,
                        args.induce_every, deploy_workers, args.acquire_mode, args.learn_workers,
                        args.repair_turns, args.repair_methods, args.verify_mode,
-                       args.agentic, args.agentic_max_turns, args.native_skills, args.batch_size)
+                       args.agentic, args.agentic_max_turns, args.native_skills, args.batch_size,
+                       args.retrieval)
     if args.workers <= 1:
         for m, s in jobs:
             results[m][s] = _call(m, s)
