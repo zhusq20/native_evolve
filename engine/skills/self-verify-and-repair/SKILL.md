@@ -1,54 +1,35 @@
 ---
 name: self-verify-and-repair
-description: Use BEFORE finishing ANY task that produces a checkable artifact — generated code or a spreadsheet/file output, text bound by explicit constraints (format/length/keywords/schema), or a factual answer. Derive a reference-free check from the task ITSELF (no answer key needed), run it, read the real result, and repair the artifact until the check passes. Turns a plausible-but-wrong first attempt into a verified one. Dataset-agnostic: pick the check channel that fits the artifact.
+description: Use BEFORE finishing ANY task that produces a checkable artifact (generated code, a spreadsheet/file you write, constraint-bound text, or a factual answer). You are NOT done until you have RUN a reference-free check on your own output and it PASSED. For files/spreadsheets you MUST write the COMPUTED LITERAL value a reader consumes — never a formula string ('=...'), which is stored as text and never evaluated. Derive the check from the task itself, run it, repair, repeat until it passes.
 ---
 
-## When to use
-- Always, as the last step before you consider a task done — your first attempt looks right far more
-  often than it is right.
-- Especially when the task produces something you can OBJECTIVELY check without the answer: code you can
-  run, a file whose cells/fields you can read back, output that must satisfy stated rules, or a claim you
-  can trace to given evidence.
+## Rules (non-negotiable — read first)
+1. **Write the VALUE in the exact form the consumer reads.** For an openpyxl/spreadsheet output that means the **computed literal** in each answer cell: compute it in Python and assign the number/string. **NEVER assign a string that starts with `=`.** A leading `=` is a formula; openpyxl stores it verbatim and never computes it, so the grader reads the formula text (or `None`) and marks it WRONG. This single mistake is the most common failure — do not make it.
+   - **This applies even if the task is naturally "a formula."** If you catch yourself BUILDING an Excel formula string — any text containing `=`, `IF(`, `SUM(`, `COUNTIF`, `VLOOKUP`, etc. — to assign into a cell (directly OR via a variable like `f = "=IF(...)"; ws[c] = f`): **STOP.** Re-implement that same logic in plain Python over the worksheet data and write the **resulting value** into the cell. The grader wants the computed answer, never the formula that would produce it.
+2. **You may NOT finish until you have actually EXECUTED the check below and seen it print `VERIFY OK`.** Reading your code is not a check. If you have not run the check this turn, you are not done — run it now.
+3. **Repair to the specific failure, then re-run the check.** Never stop on an unchecked first attempt.
 
 ## Steps
-1. **State what a correct answer must satisfy**, reading only the task (never an answer key). Extract the
-   concrete, checkable requirements: must it run without error? must it hit specific constraints? must it
-   be in an exact form / grounded in the given evidence?
-2. **Pick the strongest available check channel** for THIS artifact:
-   - **Runnable artifact** (a script, generated code, a spreadsheet-manipulation program): **EXECUTE it**
-     on the given input and inspect the ACTUAL output. This is the most objective channel — prefer it
-     whenever something can be run.
-   - **Explicit constraints in the task** (required format, length, must-include words, JSON schema,
-     section structure): check your output against EACH constraint, one at a time.
-   - **Free-form / factual answer**: check **grounding** (is every claim supported by the given evidence?),
-     **form** (does it match the requested format, units, and granularity EXACTLY?), and self-consistency.
-3. **Run the check and read the real result** — the traceback, the values actually produced, the per-
-   constraint pass/fail. Do not assume; observe.
-4. **Repair to the specific failure.** Diagnose the exact thing that failed and fix only that, then re-run
-   the check. Iterate a few rounds; each fix targets the observed failure, never a blind rewrite.
-5. **Cover the blind spot (form-clean but meaning-wrong).** A check can pass on FORM while the VALUE is
-   wrong: code that ran and wrote literals but computed the wrong number; constraints all satisfied but the
-   answer is off-topic. Spend one pass re-deriving the answer from the task (right operation, filter,
-   rounding, units, which rows/entities) to catch the semantic errors the surface check misses.
-6. **Stop when the check passes AND the value sanity-holds**, then output the final artifact in the form
-   the task requested.
+1. **Inspect the input** and restate, from the task alone, what a correct output must satisfy: which cells/fields, what value, what form.
+2. **Produce the artifact** (e.g. write `solution.py`). Compute every required value in Python and write **literals, not formulas**.
+3. **Run it** (`python solution.py`) to produce the output. Fix any crash from the full traceback before continuing.
+4. **Run the verification — this step is MANDATORY, do not skip it.** Re-open the produced output and assert each required cell holds a correct LITERAL. For an openpyxl output, run exactly this kind of check (fill in the answer cells from the task's "Expected answer position"):
+   ```python
+   import openpyxl
+   wb = openpyxl.load_workbook(OUTPUT_PATH, data_only=False)
+   bad = []
+   for sheet, coord in ANSWER_CELLS:                 # e.g. [("Sheet1", "B2"), ("Sheet1", "B3")]
+       v = wb[sheet][coord].value
+       if isinstance(v, str) and v.startswith("="):  bad.append((coord, "FORMULA-STRING", v))
+       elif v is None:                                bad.append((coord, "EMPTY"))
+   print("VERIFY FAIL:", bad) if bad else print("VERIFY OK")
+   ```
+   **Do not finish while it prints `VERIFY FAIL`.** (Even better: paste this assertion at the END of `solution.py` so running your script self-checks and fails loudly on poison.)
+5. **Check the VALUE, not just the form.** A cell can hold a clean literal that is the wrong number. Recompute one or two answers by hand from the task (right operation / filter / rounding / units / which rows) and compare.
+6. **Repair and re-run steps 3–5** until the form check passes AND the values look right. Only then finish and output the final artifact.
 
-## Failure modes (keep — do not delete; worked examples across task types)
-- **"Right idea, wrong form" (the universal silent failure).** The output's TYPE, GRANULARITY, or
-  literal-vs-expression shape does not match what the consumer/grader compares. Every example below is an
-  instance of this.
-- **Spreadsheet / openpyxl — formula-string poison (#1 killer).** Writing `cell = "=SUM(A:A)"` stores the
-  *string*; openpyxl never evaluates it, so a reader sees the formula text (or `None`), not the number.
-  FIX: compute the value in Python and write the **literal**. Verify by reloading
-  (`load_workbook(path, data_only=False)`) and confirming the answer cells hold concrete values — not a
-  string starting with `"="`, not `None`. Also: empty answer cells, header/index off-by-one (rows/cols are
-  1-indexed), and clobbering cells you weren't asked to change.
-- **Generated code (any language).** Crashes you never hit because you never executed it; "works on my
-  one example" but not on the real input shape; hardcoded paths or row/element counts instead of iterating
-  the actual data. FIX: run it on the given input before finishing.
-- **Instruction-following.** Satisfying some constraints while violating others — and multi-constraint
-  prompts interact, so fixing one can break another. Iterate until ALL stated constraints pass at once;
-  do not silently drop a required format/length/keyword.
-- **Factual / QA.** A verbose answer with explanation when a minimal exact span was asked (form mismatch);
-  a claim not actually supported by the provided evidence (grounding failure); wrong granularity or units.
-  FIX: emit exactly the requested form, and ground each claim in the evidence.
+## What the check catches by task type
+- **Spreadsheet / openpyxl (most common here):** formula-string poison (`cell = "=SUM(...)"` stored as text → reader sees the formula/`None`; FIX: `cell = sum(...)`, the Python-computed literal); empty answer cells; header/index off-by-one (openpyxl rows/cols are 1-indexed); clobbering cells you weren't asked to change.
+- **Generated code (any language):** crashes you never hit because you never ran it; "works on my one example" but not the real input shape; hardcoded paths or row/element counts.
+- **Instruction-following:** some constraints satisfied while others are violated (they interact — fixing one can break another); iterate until ALL stated constraints pass at once.
+- **Factual / QA:** verbose answer when an exact minimal span was asked (form mismatch); a claim not grounded in the given evidence; wrong granularity or units.

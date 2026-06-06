@@ -165,6 +165,11 @@ def main():
     ap.add_argument("--learn_workers", type=int, default=4,
                     help="serving mode: background reflection workers (the async learner pool). "
                          "Store writes are serialized by STORE_LOCK regardless.")
+    ap.add_argument("--batch_size", type=int, default=1,
+                    help="BOUNDED-STALENESS parallel prequential: solve B tasks concurrently against "
+                         "one committed memory snapshot, then learn before the next batch. Speedup ~B; "
+                         "memory staleness <= B tasks (vs whole-stream under full serving). 1 = strict "
+                         "sequential (max memory fidelity). Applies to learning methods only.")
     ap.add_argument("--repair_turns", type=int, default=0,
                     help="max CONDITIONAL repair rounds per task (0=single-shot). A round fires "
                          "only when env.verify (REFERENCE-FREE, reads no gold) rejects the attempt, "
@@ -611,9 +616,84 @@ def main():
                             len(episodic.load()) if args.method in ("episodic", "ours_full") else 0))
         return rows
 
+    def batched_learn(stream, phase, B):
+        """BOUNDED-STALENESS parallel prequential — the speed<->memory-fidelity tradeoff knob.
+
+        Process the stream in chunks of B. All B tasks in a chunk are SOLVED CONCURRENTLY against the
+        SAME committed memory snapshot (no writes happen during a chunk's solve phase), THEN learned
+        from (record/credit/reflect — writes serialized) BEFORE the next chunk. So memory staleness is
+        BOUNDED BY B (a task sees every lesson from tasks > B positions back), unlike full serving where
+        a task may see an almost-empty store. B=1 reduces to strict-sequential prequential (max memory
+        fidelity); B=N is full parallel (max speed, no online memory). The knob preserves the
+        harness-observable memory while making inference B-way parallel. Consolidation fires at the chunk
+        boundary that crosses each induce_every multiple. Per-row stats are read AFTER that task's learn
+        (as in process()), so the curve is directly comparable to the sequential one."""
+        items = list(enumerate(stream))
+        workers = max(1, min(B, 16))
+        rows, run = [], cum_cost()[0]
+        next_induce = args.induce_every if args.induce_every > 0 else 0
+
+        def _solve_only(pair):                                 # read-only on the store (no writes)
+            idx, task = pair
+            mem_at = len(store.load())
+            mem_block, injected_ids = inject(task)
+            resp, ev, meta = solve(task, mem_block, want_cost=True)
+            return {"idx": idx, "task": task, "resp": resp, "ev": ev, "meta": meta,
+                    "ids": injected_ids, "mem_at": mem_at}
+
+        for c0 in range(0, len(items), B):
+            chunk = items[c0:c0 + B]
+            solved = llm.pmap(_solve_only, chunk, workers)      # PARALLEL solve, shared snapshot
+            for s in sorted(solved, key=lambda r: r["idx"]):    # LEARN in idx order (writes serialized)
+                task, resp, ev, meta, injected_ids = s["task"], s["resp"], s["ev"], s["meta"], s["ids"]
+                if args.method in ("episodic", "ours_full"):
+                    try:
+                        episodic.record(task["id"], task["question"], resp, ev["em"] == 1.0,
+                                        signature=(ev.get("_repair_signatures") or [""])[-1])
+                    except Exception as exc:
+                        sys.stderr.write("episode record error @%d: %s\n" % (s["idx"], exc))
+                if args.method in ("ours_mem", "ours_full") and injected_ids:
+                    try:
+                        curate.credit(injected_ids, ev["em"] == 1.0)
+                    except Exception as exc:
+                        sys.stderr.write("credit error @%d: %s\n" % (s["idx"], exc))
+                if args.method in ("ours_mem", "ours_full", "ace"):
+                    try:
+                        reflect.run(summary=envs_pkg.render_evidence(
+                            envs_pkg.collect_evidence(env, task, resp, ev)), promote_skills=False)
+                    except Exception as exc:
+                        sys.stderr.write("reflect error @%d: %s\n" % (s["idx"], exc))
+                run += meta["cost"]
+                bullets, skill_state = store.load(), store.load_skill_state()
+                rows.append({
+                    "idx": s["idx"], "phase": phase, "id": task["id"], "em": ev["em"], "f1": ev["f1"],
+                    "sub_em": ev["sub_em"], "pred": ev["predicted_answer"][:80], "n_bullets": len(bullets),
+                    "n_episodes": len(episodic.load()) if args.method in ("episodic", "ours_full") else 0,
+                    "max_uses": max((b.get("uses", 0) for b in bullets), default=0),
+                    "max_helpful": max((b.get("helpful", 0) for b in bullets), default=0),
+                    "n_active_skills": sum(1 for v in skill_state.values() if v.get("status") == "active"),
+                    "repair_calls": meta["repair_calls"], "cum_cost_usd": round(run, 6),
+                    "cum_output_tokens": 0,
+                })
+            last = chunk[-1][0] + 1
+            sys.stderr.write("[%s seed%d %s/B=%d] %d/%d done (mem snapshot=%d bullets)\n"
+                             % (args.method, args.seed, phase, B, last, len(items),
+                                solved[0]["mem_at"] if solved else 0))
+            if args.method == "ours_full" and next_induce and last >= next_induce:
+                try:
+                    consolidate(chunk[-1][0])
+                except Exception as exc:
+                    sys.stderr.write("consolidate error @%d: %s\n" % (chunk[-1][0], exc))
+                while next_induce and next_induce <= last:
+                    next_induce += args.induce_every
+        return rows
+
     def learn_stream(stream, phase):
-        """Route a learning phase: serving (concurrent serve + async learn) when requested for a
-        learning method, else strict-sequential prequential (or parallel for no-writes methods)."""
+        """Route a learning phase: bounded-staleness micro-batch (--batch_size>1), else serving
+        (concurrent serve + async learn), else strict-sequential prequential (or parallel for
+        no-writes methods)."""
+        if args.batch_size > 1 and args.method in LEARN_METHODS:
+            return batched_learn(stream, phase, args.batch_size)
         if args.acquire_mode == "serving" and args.method in LEARN_METHODS and args.deploy_workers > 1:
             return serve_and_learn(stream, phase)
         return run_phase(stream, learn=True, phase=phase)

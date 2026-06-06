@@ -201,6 +201,50 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-06  (session 12 — agentic skill billed verdict + micro-batch parallelism + MATH env + the "is batching native?" analysis)
+Three threads: closed the agentic-skill side-experiment, built the parallelism+memory tradeoff knob, and
+started the cross-benchmark generalization expansion.
+
+**1. Agentic self-verify skill — billed verdict: small, NOT significant on haiku; wording is not the lever.**
+SB agentic no_memory, idx-aligned: noskill 0.500 / skill-v1 0.562 / skill-v2 (sharpened wording) 0.562.
+v1 vs noskill = rescued 3/broke 1 (net +2/32, McNemar p=0.625). v2 == v1 EM, v2-vs-v1 = 2 flips each way
+(pure noise) and slightly pricier. The n=12 smoke's +0.167 was a small-sample fluctuation; at n=32 it's
++0.062 within noise. Probe diagnosis (confirmed): haiku writes formula-string poison even WITH the skill
+and **does not execute the mandatory verify step** — the bottleneck is the model's agentic discipline, not
+the skill text. **Decision (user): the self-verify skill is an APPARATUS capability-booster, decoupled from
+the paper's gate main line; it would need a model that actually follows it (sonnet) to pay off.** Runs
+(gitignored): `results/_ag_sb32_{noskill,skill,skill_v2}/`.
+
+**2. Micro-batch parallelism — the speed↔memory-fidelity tradeoff knob (`--batch_size B`).** `batched_learn`
+in `prequential.py`: solve B tasks CONCURRENTLY against one committed memory snapshot, then learn (record/
+credit/reflect, writes serialized) before the next batch → **memory staleness ≤ B** (vs whole-stream under
+full serving). B=1 == strict sequential (max fidelity); B=N == full parallel (no online memory). Threaded
+through `run.py`. Validated end-to-end (MATH ours_full n=8 B=4: ran clean, $0.17).
+**Is batching "native"? — analysis (user asked):** YES at the mechanism level — reflect→curate→promote in
+the loop, deterministic curation, no external trainer, all unchanged; batching only changes scheduling/
+concurrency, and bounded-staleness concurrent serving is what a REAL native deployment does. It only relaxes
+strict online causality WITHIN a batch (B→N drifts toward offline). **Resolution for generalization testing:
+separate "parallelize evaluation" (always native-safe: held-out deploy is READ-ONLY, no learning to
+compromise) from "parallelize learning" (the batching tradeoff). Use FROZEN protocol — native sequential
+(B=1) learning on a small few-shot acquisition set → freeze → fully-parallel read-only deploy on held-out.**
+Parallelism lands on the no-learning phase → native claim untouched. Batching stays the serving/scalability
+story, reported with its staleness; the native online-curve headline stays B=1.
+
+**3. MATH env (`eval/envs/math.py`) — built + offline-validated; new SHARED-PROCEDURE regime.** Data already
+staged (`eval/data/math/`, 960 tasks, topics algebra/number_theory/counting/prealgebra). Boxed-answer
+extractor + Hendrycks-style normalizer (frac/decimal/commas/$/degrees), exact-answer score, FORMAT-only
+ref-free verify (memory-carried regime, repair idle — the MATH↔SB mirror), gold-grounded evidence for
+method-level reflection. `eval/test_math_env.py` 4/4 pass. **CAVEAT: only levels 1–3 are staged and they
+CEILING haiku (n=8 → 8/8, memory didn't grow — all-pass → nothing to reflect).** Need harder difficulty
+(re-extract levels 4–5 from the HF parquets) for real headroom, else MATH is a ceiling regime for haiku.
+
+**Benchmark expansion plan (from the user's 13-list):** ADOPT HoVer (claim-verification, hop-families,
+hotpot-shaped, low effort) + MATH (built, needs harder levels). REJECT for now: OfficeQA/DocVQA (vision),
+PUPA (LLM-judge+API), ARC-AGI (anti-reuse+floors), WebShop/ScienceWorld/AppWorld/ALFWorld (stateful
+multi-turn env simulators = separate weeks-each initiative). **NEXT:** re-extract harder MATH (or
+deprioritize for haiku); build HoVer env; run the few-shot single-seed generalization sweep under
+frozen+parallel-deploy (B=1 native acquisition) across the 6 envs (SB/searchqa/HotpotQA/IFBench/HoVer/MATH).
+
 ### 2026-06-05  (session 11 — #5 AGENTIC harness + the native verify-repair SKILL [code built, offline-validated, billed run pending])
 Acted on the design discussion: the single-shot harness STRUCTURALLY suppresses the skill tier — a
 *procedural* skill (run→observe→fix) is dead text when the agent has `allowedTools=Read`, no `cwd`, no
