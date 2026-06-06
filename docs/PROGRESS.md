@@ -217,13 +217,22 @@ FLOOR** (HoVer closed-book). ⇒ for a haiku target, reliable headroom = symboli
 QA is a dead end. Probe: `results/_hover_probe/`.
 **[UPDATE — AIME-2025 probe (reused the `math` env, n=30): no_memory EM=0.767 (23/30).]** Even hard
 competition math NEAR-CEILINGS haiku-4.5, and AIME is **not reuse-structured** (diverse problems, no shared
-procedure) + tiny n → triple-strike, not viable. **FOUR-PROBE META-FINDING: haiku-4.5 is too capable for
-standard benchmarks to leave clean headroom — knowledge QA & competition math ceiling (or HoVer floors),
-and the only RELIABLE headroom + reuse-structure is tedious SYMBOLIC-MANIPULATION FAMILIES (word_sorting,
-dyck).** Implication: either (a) CONSOLIDATE on the symbolic regime (probe harder BBH variants — 7-object
-tracking/logical, etc. — for 1-2 more headroom families, then finish skill-formation: skill-OFF + seeds), or
-(b) make a deliberate TARGET-MODEL choice (a weaker target opens the benchmark space but re-baselines
-everything). Probe: `results/_aime_probe/` (gitignored). Data: `eval/data/aime25.jsonl` (tracked, 30 probs).
+procedure) + tiny n → triple-strike, not viable.
+**[UPDATE 2 — ZebraLogic probe (built `eval/envs/zebra.py`, logic-grid puzzles, n=88 across sizes 2x2..5x5,
+WildEval filled solutions, `test_zebra_env.py` 15/15): no_memory puzzle-EM=1.000 — even 5x5 (which stumps
+GPT-4o). Manually verified one 5x5: haiku produced genuine constraint-propagation reasoning + the EXACT
+25-cell gold grid (scorer correct; the model really solves them, or memorized this 2024 public set — either
+way ceiling).]**
+**FIVE-PROBE META-FINDING (CONCLUSIVE): haiku-4.5 is too capable for standard benchmarks to leave clean
+headroom — knowledge QA, competition math (AIME 0.767), AND logic-grid puzzles (Zebra 1.000) all CEILING;
+HoVer FLOORS. The ONLY reliable headroom + reuse-structure is tedious MECHANICAL-TEDIUM symbol manipulation
+(word_sorting 0.52, dyck 0.73) — where a SMART model still slips on the TEDIUM, not the reasoning. Refined
+scope: memory/skill helps where the model is CAPABLE-BUT-ERROR-PRONE (mechanical tedium), not where it is
+already reliable. Benchmark-hunting for a haiku-4.5 target is EXHAUSTED.** Implication: either (a) CONSOLIDATE
+on the mechanical-tedium symbolic regime (word_sorting/dyck + harder variants → finish skill-formation:
+skill-OFF + seeds), or (b) make a deliberate TARGET-MODEL choice (a weaker target opens the benchmark space
+but re-baselines everything). Probes (gitignored): `results/_{aime,hover,zebra}_probe/`. New tracked data/env:
+`eval/data/{aime25,zebra_val}.jsonl`, `eval/envs/zebra.py`.
 
 ### 2026-06-06  (session 13 — BBH skill-formation: FIRST DURABLE gate activation + strong memory wins on procedure-families)
 Built the **BBH env** (family-structured shared-procedure regime) to give the skill-promotion gate its
