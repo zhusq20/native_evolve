@@ -203,6 +203,56 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-06  (session 13 — BBH skill-formation: FIRST DURABLE gate activation + strong memory wins on procedure-families)
+Built the **BBH env** (family-structured shared-procedure regime) to give the skill-promotion gate its
+first FAIR test: a family where the procedure transfers to EVERY instance (→ no dilution → no gate
+false-positive) and mid-range base gives val power (→ no false-negative). Frozen protocol
+(acquire 32 / val 32 / test 96), 2 arms (no_memory / ours_full), 1 seed, haiku, **repair off, lexical
+retrieval**, max-parallel (3 families × `run.py`, peak ~42 concurrent).
+
+**Dataset reality check (validity-first: no_memory launched FIRST as the headroom probe).** BBH is MOSTLY
+CEILING for haiku-4.5 — 6/8 probed families ≥0.85 (logical_deduction_five **1.000**, multistep_arithmetic
+**0.990**, temporal_sequences 1.000, tracking_shuffled 1.000, date_understanding 0.938, geometric_shapes
+0.854). Only symbol-manipulation families keep headroom. Killed the ceiling families BEFORE spending
+ours_full on them (the headroom-first design paid off; logical_deduction + multistep dropped).
+
+**Result — the 2 headroom families:**
+| family | no_memory | ours_full | rescued/broke (n=96) | skill tier |
+|---|---|---|---|---|
+| **word_sorting** | 0.521 | **1.000** | **46 / 0** (net +46, MONOTONE) | gate REJECTED (val saturated 32/32) → memory-only |
+| **dyck_languages** | 0.729 | **0.917** | 23 / 5 (net +18) | gate **ACTIVATED** `dyck-language-stack-algorithm` |
+
+**Findings:**
+1. **ours_full strongly beats no_memory on both procedure-families** (+0.479 *monotone* on word_sorting,
+   46 rescued / 0 broken; +0.188 on dyck). The method clearly works in the shared-procedure regime.
+2. **FIRST DURABLE GATE ACTIVATION in the project.** dyck promoted `dyck-language-stack-algorithm` — a
+   QUALITATIVELY CORRECT skill (stack-based bracket tracking + the key *"output only the completion
+   FRAGMENT, not the full string"* insight = exactly the failure mode), kept **active at freeze/test**
+   (`PROMOTED_SKILL.md`). The induce→gate pipeline produced and durably retained a real skill — the
+   long-standing "gate never fires" gap, finally closed on the right regime.
+3. **The gate is well-calibrated.** ACTIVATE when headroom + skill robustly beats memory (dyck @15:
+   base27→full29, rescued4 broke2, n32, sat=False); REJECT when memory saturates val (word_sorting,
+   base 32/32 every checkpoint) OR a candidate doesn't robustly beat memory (dyck's 2nd candidate @31:
+   cum full57<base58 → reject, kept as candidate). "Promote iff it beats memory on held-out val, else
+   degrade gracefully."
+
+**HONEST caveats:**
+- **Skill ATTRIBUTION unresolved.** With only no_memory/ours_full (skill-OFF arm dropped per user call),
+  we can't isolate the skill's marginal contribution to dyck's +0.188 from the memory's. word_sorting's
+  +0.479 is PURE memory (skill rejected). The gate's val A/B showed the dyck skill +2 @15 but ~neutral @31
+  → modest/uncertain marginal value. **NEXT: add the skill-OFF arm (`--induce_every 0`) to isolate "the
+  skill caused X on held-out test"** — this is now the single highest-value follow-up for the C1 skill claim.
+- **1 seed, 2 families** → signal not significance.
+- **BBH-haiku ceiling**: only 2/8 families had headroom; BBH is too easy for haiku-4.5. Lesson for
+  skill-formation headroom: need harder symbolic tasks (e.g. word_sorting/dyck longer, 7-object variants)
+  or a weaker target model.
+- **Spend $22.42** (over the ~$13 estimate: ours_full ran $6.3–7.5/family — acquire + gate A/B + test —
+  and the ceiling families' no_memory probes + the 4-family MC probe added ~$6).
+
+Files: `eval/envs/bbh.py`, `eval/test_bbh_env.py` (28/28), `eval/data/bbh/`. Results: `results/bbh_skillform/`
+(+ `dyck_languages/PROMOTED_SKILL.md`). **NEXT:** the skill-OFF vs skill-ON(forced) arm to isolate the skill;
+≥3 seeds; harder-headroom families (or weaker target) so the skill tier has more room than memory.
+
 ### 2026-06-06  (session 13 — IFBench ours-vs-baseline headline + retrieval switched to the NATIVE agentic-index paradigm)
 Two threads: (1) the requested clean `ours_full` vs `no_memory` headline on a NEW non-math benchmark
 (no component ablations); (2) per the user, replaced the lexical top-k memory retriever with Claude
