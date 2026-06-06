@@ -203,6 +203,19 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-06  (session 13 — HoVer env built, but closed-book FLOORS haiku → not viable; the headroom pattern crystallizes)
+Built **HoVer env** (`eval/envs/hover.py`, multi-hop claim verification, num_hops 2/3/4 families, binary
+SUPPORTED/NOT_SUPPORTED EM, decomposition-procedure evidence; closed-book because `supporting_facts` lack
+text and the wiki corpus is multi-GB; `test_hover_env.py` 19/19, balanced 300-claim val). **Headroom probe
+(no_memory, haiku, n=60 stratified): EM=0.533 ≈ guessing floor** (hop2 0.60 / hop3 0.55 / hop4 **0.45 below
+chance**; model BIASED to NOT_SUPPORTED 38/60, 8 no-verdict). **Closed-book HoVer FLOORS haiku** — it can't
+verify multi-hop claims from parametric knowledge → guesses → no room for memory/skill. Env kept for a
+future OPEN-BOOK version (needs the wiki corpus). **THE SESSION-13 HEADROOM PATTERN (3 benchmarks probed):**
+haiku-4.5 has headroom ONLY on **tedious symbolic manipulation** (BBH word_sorting 0.52 / dyck 0.73);
+**knowledge/reasoning benchmarks CEILING** (BBH MC 6/8 ≥0.85, MATH L1-3) or the model **can't do them →
+FLOOR** (HoVer closed-book). ⇒ for a haiku target, reliable headroom = symbolic/algorithmic tasks or
+genuinely-hard math (AIME/LiveBench, probe-first); knowledge QA is a dead end. Probe: `results/_hover_probe/`.
+
 ### 2026-06-06  (session 13 — BBH skill-formation: FIRST DURABLE gate activation + strong memory wins on procedure-families)
 Built the **BBH env** (family-structured shared-procedure regime) to give the skill-promotion gate its
 first FAIR test: a family where the procedure transfers to EVERY instance (→ no dilution → no gate
