@@ -213,8 +213,17 @@ verify multi-hop claims from parametric knowledge → guesses → no room for me
 future OPEN-BOOK version (needs the wiki corpus). **THE SESSION-13 HEADROOM PATTERN (3 benchmarks probed):**
 haiku-4.5 has headroom ONLY on **tedious symbolic manipulation** (BBH word_sorting 0.52 / dyck 0.73);
 **knowledge/reasoning benchmarks CEILING** (BBH MC 6/8 ≥0.85, MATH L1-3) or the model **can't do them →
-FLOOR** (HoVer closed-book). ⇒ for a haiku target, reliable headroom = symbolic/algorithmic tasks or
-genuinely-hard math (AIME/LiveBench, probe-first); knowledge QA is a dead end. Probe: `results/_hover_probe/`.
+FLOOR** (HoVer closed-book). ⇒ for a haiku target, reliable headroom = symbolic/algorithmic tasks; knowledge
+QA is a dead end. Probe: `results/_hover_probe/`.
+**[UPDATE — AIME-2025 probe (reused the `math` env, n=30): no_memory EM=0.767 (23/30).]** Even hard
+competition math NEAR-CEILINGS haiku-4.5, and AIME is **not reuse-structured** (diverse problems, no shared
+procedure) + tiny n → triple-strike, not viable. **FOUR-PROBE META-FINDING: haiku-4.5 is too capable for
+standard benchmarks to leave clean headroom — knowledge QA & competition math ceiling (or HoVer floors),
+and the only RELIABLE headroom + reuse-structure is tedious SYMBOLIC-MANIPULATION FAMILIES (word_sorting,
+dyck).** Implication: either (a) CONSOLIDATE on the symbolic regime (probe harder BBH variants — 7-object
+tracking/logical, etc. — for 1-2 more headroom families, then finish skill-formation: skill-OFF + seeds), or
+(b) make a deliberate TARGET-MODEL choice (a weaker target opens the benchmark space but re-baselines
+everything). Probe: `results/_aime_probe/` (gitignored). Data: `eval/data/aime25.jsonl` (tracked, 30 probs).
 
 ### 2026-06-06  (session 13 — BBH skill-formation: FIRST DURABLE gate activation + strong memory wins on procedure-families)
 Built the **BBH env** (family-structured shared-procedure regime) to give the skill-promotion gate its
