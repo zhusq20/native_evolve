@@ -5,6 +5,9 @@ __pycache__/
 
 # Large, regenerable benchmark data (re-download — see docs/PROGRESS.md "Data").
 eval/data/spreadsheet/
+# MATH raw HuggingFace parquet sources (re-fetchable binaries; the extracted *.jsonl task
+# files under eval/data/math/ and math_*val.jsonl ARE tracked, like searchqa_val.jsonl).
+eval/data/math_hf/
 
 # Per-run working dirs (transcripts/ledgers): bulky + reproducible.
 # We KEEP the results of record: tasks.jsonl, curve.csv, summary.json, *.svg.
