@@ -244,11 +244,23 @@ retrieval. Our engine's lexical bag-of-words top-k (`retrieve.select`, score = o
   + codex runner still use lexical `context_block` (deployment behavior unchanged) — follow-up. Our
   distilled bullets are already terse one-liners so index-entry == body; a deeper V2 (inject the linked
   episode as the on-demand "body") and a true `--agentic` Read-on-demand variant are noted but unbuilt.
-Files: `engine/evolve/retrieve.py`, `eval/{prequential,run,test_agentic_retrieval}.py`.
-**NEXT (needs budget sign-off):** the headline A/B — re-run `ours_full` IFBench n=24 seed0 with
-`--retrieval agentic` vs the lexical **0.792** (shared `no_memory` **0.708**) → does native agentic-index
-selection beat lexical top-k, and at what cost delta? Then ≥3 seeds; carry to **SB** (where lexical is
-weakest on diverse, low-overlap tasks — highest expected gain); optionally switch the live hook.
+Files: `engine/evolve/retrieve.py`, `eval/{prequential,run,test_agentic_retrieval}.py`; method diagram
+`docs/architecture.md` (Mermaid + ASCII, accurate to the agentic-index method).
+
+**A/B RESULT (billed, IFBench n=24 seed0 haiku — agentic vs lexical, IDENTICAL config, the only diff is
+`--retrieval`):**
+| ours_full retrieval | preqEM | F1 | 1stH | 2ndH | cost$ | calls |
+|---|---|---|---|---|---|---|
+| LEXICAL top-k | 0.792 | 0.840 | 0.750 | 0.833 | 2.57 | 119 |
+| **AGENTIC-INDEX (native)** | **0.833** | 0.833 | **0.833** | 0.833 | 3.10 | 164 |
+
+(shared `no_memory` 0.708.) Agentic **+0.042 EM** over lexical (net +1 task: rescued idx 9 & 23, broke idx
+17), **flat on F1** (0.833 vs 0.840), and a higher **1st-half** (0.833 vs 0.750 — better selection even with
+few bullets). Cost **+21%** (+45 selection calls). vs vanilla **+0.125**. **CAVEAT:** 1 seed, n=24, SE≈0.08
+⇒ +0.042 ≈ 0.5 SE = WITHIN NOISE — directionally positive on EM, a wash on F1; the native paradigm DID NOT
+HURT and is the more on-thesis design, but this n/seed cannot call it a win. Results: `results/ifbench_agentic/`.
+**NEXT:** ≥3 seeds on this A/B; carry to **SB** (lexical is weakest on diverse, low-overlap codegen tasks →
+highest expected gain — the real test of agentic-index); optionally switch the live hook adapter to agentic.
 
 ### 2026-06-06  (session 12 — agentic skill billed verdict + micro-batch parallelism + MATH env + the "is batching native?" analysis)
 Three threads: closed the agentic-skill side-experiment, built the parallelism+memory tradeoff knob, and
