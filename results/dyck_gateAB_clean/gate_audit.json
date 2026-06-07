@@ -1,0 +1,34 @@
+{
+  "idx": 31,
+  "candidates": [
+    "dyck-exhaust-stack"
+  ],
+  "oracle": {
+    "base_pass": 29,
+    "full_pass": 29,
+    "n": 32,
+    "rescued": 2,
+    "broke": 2,
+    "base_fail": 3,
+    "powered": true,
+    "beats_margin": false,
+    "not_diluting": true,
+    "saturated": false,
+    "activate": false
+  },
+  "reffree": {
+    "base_pass": 31,
+    "full_pass": 31,
+    "n": 32,
+    "rescued": 1,
+    "broke": 1,
+    "base_fail": 1,
+    "powered": true,
+    "beats_margin": false,
+    "not_diluting": true,
+    "saturated": false,
+    "activate": false
+  },
+  "agree": true,
+  "live_signal": "oracle"
+}

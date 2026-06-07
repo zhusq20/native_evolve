@@ -209,6 +209,49 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-07  (session 15 cont. — VALIDATION EXPERIMENT: clean precision-law-FOR-GATING audit on dyck → mechanism works; 1-seed AGREE-on-reject + a measured reffree precision gap; discriminating ACTIVATE case still pending)
+Ran the first billed validation of the session-14 reference-free refactor: the `ours_full` reffree-vs-oracle
+GATE A/B (does a no-gold gate make the same accept/reject decision as the gold gate?). **Budget gate honored**
+(user chose "smoke then make-or-break ~$22"; spent ~$10.4 total).
+
+**Validity checks BEFORE spending (caught two design traps):**
+- The gate A/B only means something on an env where the gate ACTIVATES a skill. Checked session-13 BBH: the
+  gate REJECTED on **word_sorting** (lift was from distilled BULLETS, not a skill) and ACTIVATED on
+  **dyck_languages** → switched the experiment to **dyck**.
+- **Smoke (dyck 16/18/24, oracle vs reffree as two separate runs) exposed an acquisition-noise confound:** the
+  two arms acquired DIFFERENT memory purely from claude reflection stochasticity (oracle 1 bullet→0 candidates;
+  reffree 7 bullets→2 candidates), so comparing their test EM doesn't isolate the gate signal. Also the gate
+  doesn't fire at the smoke scale (oracle induced nothing). Smoke DID validate the reffree gate PATH end-to-end
+  (induced 2 cands, ran the reference-free paired A/B, graceful REJECT) + confirmed FREEZE (test wrote nothing:
+  episodes.jsonl=16=acquire-only; parallel deploy_workers=12 only safe on a frozen store).
+
+**The fix — `gate_audit` (new, offline-validated ZERO spend, `eval/test_gate_audit.py` 13/13):**
+`verify.paired_ab_multi` solves the val base/full A/B ONCE and scores it with BOTH judges (oracle gold +
+reffree self_verify) on the IDENTICAL answers → removes the judge-comparison noise; `verify.gate_tally`
+replays rolling_gate's single-round accept rule; `prequential --gate_audit` logs both decisions to
+`home/gate_audit.json` (live decision still = `--gate_signal`). Threaded through run.py.
+
+**Clean make-or-break result (dyck, ONE acquisition 32/32/96, seed0, repair OFF, lexical, induce_every 0):**
+| signal | base_pass | full_pass | rescued | broke | activate |
+|---|---|---|---|---|---|
+| oracle (gold) | 29/32 | 29/32 | 2 | 2 | **False** |
+| reffree (self-critique) | 31/32 | 31/32 | 1 | 1 | **False** |
+→ **AGREE=True (both REJECT the induced candidate `dyck-exhaust-stack`).** Deployed test EM **0.927** (skill
+kept as candidate → ours_full = episodic + 4 bullets) vs no_memory **0.729** = **+0.198 from MEMORY** (clean,
+repair off). Cost $7.93. Results: `results/dyck_gateAB_clean/` (+ `_smoke_{oracle,reffree}/`).
+
+**Interpretation (honest):** (1) the audit MECHANISM works — confound removed, both judges on identical
+answers. (2) On this seed the two gates AGREE, but it's the EASY direction: the gold gate ALSO rejected (skill
+was neutral, rescued=broke=2), so rejecting is trivially right under either signal. **We did NOT get the
+discriminating case** (gold says ACTIVATE → does reffree also activate?) — acquisition stochasticity induced a
+NEUTRAL skill this run (session-13's run induced a BENEFICIAL one, rescued=4/broke=2 → ACTIVATE). (3) **A real
+reffree PRECISION GAP is visible in the numbers:** reffree judged 31/32 base answers as ok where gold says only
+29/32 — it MISSED 2 of the 3 genuine failures (over-lenient self-critique on bracket sequences). Latent here
+(skill neutral) but exactly the failure mode that would make a reffree gate UNDER-fire on a beneficial skill =
+the precision-law-for-gating boundary. **NEXT: get the discriminating ACTIVATE case** — cheapest = a targeted
+re-test of session-13's already-ACTIVATED candidate (`dyck-language-stack-algorithm`) via `paired_ab_multi`
+with both judges (~$2); or +N dyck seeds until one induces a beneficial skill, then read the reffree decision.
+
 ### 2026-06-07  (session 15 — DESIGN DECISION: repair-lever keep-vs-drop → user picked (a) KEEP, strictly ablated + labeled-lever discipline codified)
 Resolved the one open design decision flagged in memory (`self-verify-role-split.md` → "OPEN DECISION: the
 user must pick"): whether to KEEP the harness repair loop (strictly ablated) or DROP it (signal-only). **The

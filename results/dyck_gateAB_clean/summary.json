@@ -1,0 +1,10 @@
+{
+  "ours_full": {
+    "final_preq_em": 0.9271,
+    "final_preq_f1": 0.9271,
+    "first_half_em": 0.8958,
+    "second_half_em": 0.9583,
+    "total_cost_usd": 7.9345,
+    "final_bullets": 4.0
+  }
+}
