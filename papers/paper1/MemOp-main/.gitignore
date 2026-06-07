@@ -1,0 +1,12 @@
+# Python cache files
+__pycache__/
+.pytest_cache/
+
+# Data
+dataset/
+
+# Outputs
+evaluation/evaluation_outputs
+checkpoints/
+outputs/
+saves/
