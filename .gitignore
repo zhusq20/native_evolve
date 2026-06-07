@@ -16,6 +16,10 @@ results/**/home/                 # deeper nesting (e.g. per-family: results/<exp
 
 # Scratch / de-risking runs (pilots, smokes, A/B diagnostics) — not results of record.
 results/_*/
+# smoke dirs (e.g. results/dyck_gateAB_smoke_{oracle,reffree}/)
+results/*_smoke_*/
+# stray top-level ledgers (the per-run ledger of record lives under runs/*/home/)
+results/*_ledger.jsonl
 
 # Promoted skills are a real engine/skills dir; .claude/skills is a generated symlink.
 engine/.claude/skills
