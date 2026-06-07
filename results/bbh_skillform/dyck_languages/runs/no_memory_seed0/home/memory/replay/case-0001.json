@@ -1,0 +1,6 @@
+{
+  "id": "case-0001",
+  "scope": "csv-header-check",
+  "task": "A CSV has three lines:\nLine 1: Quarterly Sales Report\nLine 2: name,amount\nLine 3: apple,5\nThe real header row is line 2 (line 1 is a title). What is the amount for 'apple'? Reply with ONLY the number, nothing else.",
+  "expect_substring": "5"
+}

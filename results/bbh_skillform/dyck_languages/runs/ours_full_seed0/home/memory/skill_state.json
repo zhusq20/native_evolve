@@ -1,0 +1,19 @@
+{
+  "dyck-language-stack-algorithm": {
+    "version": 1,
+    "status": "active",
+    "source_ids": [
+      "m-0001",
+      "m-0002"
+    ]
+  },
+  "dyck-bracket-stack-completion": {
+    "version": 1,
+    "status": "candidate",
+    "source_ids": [
+      "m-0001",
+      "m-0002",
+      "m-0003"
+    ]
+  }
+}

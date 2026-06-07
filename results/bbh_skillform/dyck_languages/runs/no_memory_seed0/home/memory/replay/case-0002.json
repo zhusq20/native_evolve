@@ -1,0 +1,6 @@
+{
+  "id": "case-0002",
+  "scope": "csv-header-check",
+  "task": "A CSV has four lines:\nLine 1: Export generated 2026-01-01\nLine 2: id,city,population\nLine 3: 1,Paris,2100000\nLine 4: 2,Lyon,520000\nLine 1 is a metadata title; the header is line 2. What is the population of Lyon? Reply with ONLY the number, no commas, nothing else.",
+  "expect_substring": "520000"
+}
