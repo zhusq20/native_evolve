@@ -231,11 +231,16 @@ def main():
                     help="max CONDITIONAL repair rounds per task (0=single-shot). A round fires "
                          "only when env.verify (REFERENCE-FREE, reads no gold) rejects the attempt, "
                          "so it is valid even at frozen-test time and free when the first attempt "
-                         "verifies. Each round is one extra claude call, billed to the ledger.")
+                         "verifies. Each round is one extra claude call, billed to the ledger. "
+                         "REPAIR IS A SEPARATE, LABELED LEVER (design (a)): default 0 keeps it OFF, "
+                         "and MEMORY claims are always read off this repair=0 column. To study repair, "
+                         "report the memory x repair 2x2 (this flag x methods) explicitly — never fold "
+                         "repair into a 'memory helps' number.")
     ap.add_argument("--repair_methods", default="ours",
-                    help="which methods get the repair loop: 'ours' (episodic/ours_mem/ours_full — "
-                         "the headline; baselines stay single-shot), 'all', or a comma list (e.g. "
-                         "'no_memory' for the apparatus-only ablation arm).")
+                    help="when --repair_turns>0, which methods get the repair lever: 'ours' "
+                         "(episodic/ours_mem/ours_full = the repair-ON cell), 'all' (every arm — for "
+                         "the clean memory x repair 2x2), or a comma list ('no_memory' = the "
+                         "apparatus-only ablation arm). Repair is a labeled lever, NOT part of memory.")
     ap.add_argument("--verify_mode", choices=["oracle", "self", "self_exec", "self_both"], default="self_both",
                     help="signal that drives the repair loop. self_both (DEFAULT, deployment-realistic): "
                          "run BOTH dataset-agnostic channels — EXECUTION + LLM semantic self-critique — "
@@ -400,10 +405,13 @@ def main():
     OURS_METHODS = ("episodic", "ours_mem", "ours_full")
 
     def _repair_budget():
-        """How many repair rounds THIS method gets. Headline: repair belongs to the 'ours'
-        family (it is the inference-time self-correction that also produces the error->fix traces
-        the method learns from); baselines stay single-shot. --repair_methods overrides the set
-        (e.g. 'no_memory' for the apparatus-only ablation, 'all' to repair every arm)."""
+        """How many repair rounds THIS method gets. Repair is a SEPARATE, LABELED lever (design (a)):
+        the DEPLOY-FAITHFUL headline keeps it OFF (repair_turns=0; native self-correction is measured
+        via --agentic, where monotone_repair is bypassed). When ON, the 'ours' family is the repair-ON
+        cell (the inference-time self-correction that also produces the error->fix traces the method
+        learns from); baselines stay single-shot. --repair_methods overrides the set ('all' for the
+        clean memory x repair 2x2, 'no_memory' for the apparatus-only ablation arm). MEMORY claims are
+        always reported at repair=0 — never read a 'memory helps' delta off a repair-on run."""
         if args.repair_turns <= 0:
             return 0
         sel = (args.repair_methods or "ours").strip().lower()

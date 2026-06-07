@@ -182,6 +182,12 @@ headline + session-8 changelog). What's genuinely next:
 6. (Carried) context-budget + poisoning stress; tool-using agent variant (`--add-dir` + Bash).
 
 ## Design decisions (and why)
+- **Repair = a SEPARATE, LABELED lever, kept (not dropped) [decision (a), session 15].** `self_verify` is
+  the reference-free OUTCOME SIGNAL (drives credit/gate/reflect = core; also feeds the repair loop). Memory
+  claims are read off the repair=0 column (default); repair's effect is reported via the memory × repair 2×2.
+  The deploy-faithful memory headline is the AGENTIC harness (native self-correction; `monotone_repair`
+  bypassed). Keeps the "learn from your own repair trajectory" sub-story without confounding "memory helps".
+  Full discipline: `docs/eval_protocol.md` → "Reporting discipline"; rationale: `memory/self-verify-role-split.md`.
 - Reuse SkillOpt's deterministic spreadsheet parts (executor+evaluator, openpyxl-only) →
   copied into `eval/envs/sb_lib/` so the repo is self-contained; faithful to the official benchmark.
 - LLM only via `claude -p` (constraint). Curation deterministic (anti context-collapse, ACE).
@@ -203,6 +209,42 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-07  (session 15 — DESIGN DECISION: repair-lever keep-vs-drop → user picked (a) KEEP, strictly ablated + labeled-lever discipline codified)
+Resolved the one open design decision flagged in memory (`self-verify-role-split.md` → "OPEN DECISION: the
+user must pick"): whether to KEEP the harness repair loop (strictly ablated) or DROP it (signal-only). **The
+user picked (a): KEEP repair as a SEPARATE, LABELED lever** — retaining the real-but-separate repair杠杆 + the
+"learn from your own repair trajectory" sub-story (rejected (b) = the purest-memory-paper route that drops the
+repair lever). The apparatus already SUPPORTED (a) cleanly (default `--repair_turns 0`; `--repair_methods`;
+agentic bypasses `monotone_repair`), so this session **codifies the reporting discipline** — no behavior change,
+ZERO claude spend.
+
+**The discipline (now enforced across code + docs):**
+1. **`self_verify` is the reference-free OUTCOME SIGNAL** (the system's own correctness signal; two roles —
+   Role 2 = drives credit/gate/reflect = CORE; Role 1 = feeds the repair loop). The repair loop is NEVER called
+   "memory".
+2. **Memory claims are ALWAYS read off the repair=0 column** (`--repair_turns 0`, the default → default config
+   is already clean).
+3. **Repair is studied via the explicit memory × repair 2×2** (methods {no_memory, ours_full} × {repair 0,
+   repair N `--repair_methods all`}) + the `no_memory+repair` apparatus-only arm. Repair's Δ is its own lever.
+4. **Deploy-faithful memory headline = the AGENTIC harness** (`--agentic`): native self-correction →
+   `monotone_repair` bypassed (`repair_calls=0`); single-shot+`monotone_repair` only STANDS IN where an env
+   lacks `agentic_attempt`.
+5. **Phase B carries the SAME signal — incl. the repair trajectory — into the deploy hooks' credit/gate** (the
+   "learn from repair" sub-story is retained, not dropped).
+
+**Files (docstrings/help/docs only — no logic change):** `eval/self_verify.py` (module docstring → named the
+reference-free OUTCOME SIGNAL + the two-role split), `eval/prequential.py` (`--repair_turns`/`--repair_methods`
+help + `_repair_budget` docstring), `eval/run.py` (mirrored help), `docs/eval_protocol.md` (new "Reporting
+discipline — the repair lever & the deploy-faithful headline" section), `docs/agentic_harness_design.md`
+(status → adopted as the deploy-faithful headline), `docs/architecture.md` (new "two levers" section + LEARN
+band relabeled to the reference-free OUTCOME SIGNAL + Phase B note). Memory updated: `self-verify-role-split.md`
+(decision RESOLVED), `native-design-law.md` (Phase B retains the repair lever), `MEMORY.md` index.
+**Validation:** `eval/test_signal_routing.py` + `eval/test_agentic.py` green (zero spend) — behavior unchanged.
+**NEXT (unchanged by this decision, now scoped):** (1) the billed `ours_full` reffree-vs-oracle gate A/B
+(precision-law-for-gating); (2) P0 stats (paired McNemar + bootstrap CI, ≥3 seeds) + the compute-matched
+`no_memory+best-of-k` arm; (3) Phase B — wire the reference-free OUTCOME SIGNAL (incl. repair trajectory) into
+the deploy hooks so deployed == evaluated.
+
 ### 2026-06-07  (session 14 — 6-paper review → the "reference-free signal" refactor: A1/A2/A3 + gate/train alignment, NO train-inference mismatch)
 Reviewed `papers/` (MemOp / SkillOpt / CoEvoSkills / MUSE / "Useful Memories Become Faulty…" / "Harness
 Updating Is Not Harness Benefit") against our engine+eval. **All code below is unit-validated with ZERO claude

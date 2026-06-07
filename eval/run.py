@@ -96,10 +96,13 @@ def main():
                     help="serving: background reflection worker pool size.")
     ap.add_argument("--repair_turns", type=int, default=0,
                     help="max conditional repair rounds per task (0=single-shot). Fires only on a "
-                         "reference-free env.verify rejection; valid at frozen-test time.")
+                         "reference-free env.verify rejection; valid at frozen-test time. SEPARATE "
+                         "LABELED LEVER (design (a)): default 0 = OFF; MEMORY claims are read off this "
+                         "repair=0 column. Study repair via the explicit memory x repair 2x2.")
     ap.add_argument("--repair_methods", default="ours",
-                    help="which methods get repair: 'ours' (headline; baselines single-shot), "
-                         "'all', or a comma list (e.g. 'no_memory' for the apparatus-only ablation).")
+                    help="when --repair_turns>0, which methods get the repair lever: 'ours' (the "
+                         "repair-ON cell; baselines single-shot), 'all' (for the clean 2x2), or a comma "
+                         "list ('no_memory' = apparatus-only ablation). Repair is NOT part of memory.")
     ap.add_argument("--verify_mode", choices=["oracle", "self", "self_exec", "self_both"], default="self_both",
                     help="repair-loop signal: self_both (DEFAULT, DATASET-AGNOSTIC: run BOTH exec + LLM "
                          "semantic self-critique; clean execution AUTHORITATIVE so critique is advisory), "

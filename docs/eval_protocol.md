@@ -107,6 +107,30 @@ identical across methods**. So C2's "lower total cost" = **acquisition cost** (d
 equal). Frozen test is cheap (no reflection) → a large held-out test is affordable and the
 expensive online reflection is confined to the small ~20% train split.
 
+## Reporting discipline — the repair lever & the deploy-faithful headline (design decision (a))
+The apparatus carries two orthogonal levers, the self-evolving **memory** and the inference-time
+**repair** loop. To keep "memory helps" attributable (the paper6 confound: *is the gain memory or
+repair?*), we adopt **design (a)** — keep repair as a real capability but report it as a SEPARATE,
+LABELED lever, never folded into a memory number. The rules:
+
+1. **`self_verify` is the reference-free OUTCOME SIGNAL** (the system's own correctness signal). It
+   has two roles: (Role 2) it drives credit / gate / reflect — CORE, the precondition for label-free
+   evolution; (Role 1) it feeds the repair loop. Name it the *outcome signal*; never call the repair
+   loop "memory."
+2. **Memory claims are ALWAYS read off the repair=0 column.** Any "does memory help?" delta comes
+   from runs with `--repair_turns 0`. Default is 0, so the default config is already clean.
+3. **Repair is studied via the explicit memory × repair 2×2** — methods {`no_memory`, `ours_full`} ×
+   {`--repair_turns 0`, `--repair_turns N --repair_methods all`} — plus the apparatus-only arm
+   (`no_memory --repair_turns N --repair_methods no_memory`). Report repair's Δ as its own lever.
+4. **The deploy-faithful memory headline is the AGENTIC harness** (`--agentic`): the agent
+   self-corrects natively in its sandbox, so the harness `monotone_repair` is BYPASSED
+   (`repair_calls=0`). Single-shot + `monotone_repair` only STANDS IN for that native self-correction
+   where an env has no `agentic_attempt`. So the agentic, repair-off run is the cleanest "memory
+   alone, deploy-faithful" measurement.
+
+See `memory/self-verify-role-split.md` (the resolved keep-vs-drop decision) and
+`memory/native-design-law.md` (the one reference-free deploy loop; gold only as an eval overlay).
+
 ## Commands
 ```bash
 # SpreadsheetBench — EXACT SkillOpt replication (80/40/280, stratified by instruction_type)

@@ -1,4 +1,16 @@
-"""Deployment-realistic, DATASET-AGNOSTIC self-verification for the repair loop.
+"""The reference-free OUTCOME SIGNAL — deployment-realistic, DATASET-AGNOSTIC self-verification.
+
+This module is the system's own correctness signal: a reference-free judge of "did this attempt go
+well?" available with NO gold at deploy. It serves TWO distinct roles (see `docs/architecture.md` +
+the `self-verify-role-split` design note) that must NOT be conflated:
+  • Role 2 — the OUTCOME SIGNAL for self-evolution: drives credit / promotion-gate / reflection (via
+    `--{credit,gate,reflect}_signal reffree`). CORE — the precondition for label-free memory evolution
+    (with no gold at deploy this is the only feedback channel that tells good from bad).
+  • Role 1 — feed for the inference-time REPAIR loop (`monotone_repair`). Repair is a SEPARATE, LABELED
+    lever, NEVER folded into "memory": memory claims are always read off the repair=0 column, and the
+    deploy-faithful headline is the AGENTIC harness (the agent self-corrects natively, so the harness
+    `monotone_repair` is bypassed and only STANDS IN for that native self-correction in single-shot).
+  (Design decision (a), session 15: keep repair as this labeled, ablatable lever — do not drop it.)
 
 The per-env `verify()` functions embed dataset knowledge a real deployment would NOT have: the
 benchmark's pre-parsed rubric (IFBench), answer-cell/answer-position semantics (SB), and tuned

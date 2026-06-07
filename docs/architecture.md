@@ -28,7 +28,7 @@ flowchart TB
   score["SCORE — gold · external · gold-isolated"]
   ans --> score
 
-  subgraph LEARN["② LEARN — self-evolution · gold-grounded EVIDENCE (train only)"]
+  subgraph LEARN["② LEARN — self-evolution · reference-free OUTCOME SIGNAL<br/>(gold = read-only eval overlay / opt-in oracle ceiling)"]
     direction TB
     rec["record episode"]
     cred["CREDIT injected ids → helpful / harmful"]
@@ -121,8 +121,23 @@ claude call (agentic select · self-critique · skill-induce + A/B), but their *
 - **C2 (native online ≥ external offline optimizer):** the whole ② LEARN band runs *in the agent's own
   loop*, amortized into real work — versus a separate offline trainer that freezes one global skill.
 
+## The two levers (memory vs repair) — design decision (a)
+The picture carries TWO orthogonal levers: the self-evolving **memory** (the LEARN band) and the
+inference-time **REPAIR** loop (the SERVE band). They are reported separately so "memory helps" stays
+attributable (decision (a), session 15: *keep repair, strictly ablate*):
+- **`VERIFY` is the reference-free OUTCOME SIGNAL** — the same signal drives both the repair loop
+  (SERVE) and credit/gate/reflect (LEARN). It is the precondition for label-free evolution.
+- **REPAIR is a separate, LABELED lever.** Memory claims are read off the **repair=0** column; repair's
+  effect is reported via the explicit memory × repair 2×2 (see `docs/eval_protocol.md`).
+- **The deploy-faithful memory headline is the AGENTIC harness**: the agent self-corrects natively, so
+  the harness `monotone_repair` is bypassed (`repair_calls=0`) and only stands in for that native
+  self-correction where an env lacks `agentic_attempt`.
+
 ## Deployment vs. evaluation
 - **Deployment** = the same loop wired into **Claude Code hooks**: `UserPromptSubmit` → RETRIEVE inject,
   `Stop` → REFLECT/CURATE/GATE (recursion-guarded). Skills live visibly in `engine/skills/`.
 - **Evaluation** = `eval/prequential.py` orchestrates SERVE+LEARN over a task stream and logs
   accuracy-vs-cumulative-cost; `eval/run.py` fans methods/seeds out in parallel.
+- **Phase B (planned)** carries the SAME reference-free OUTCOME SIGNAL — including the repair-trajectory
+  it produces — into the deploy hooks' credit/gate, so the deployed loop == the evaluated loop. The
+  "learn from your own repair trajectory" sub-story is retained under decision (a).

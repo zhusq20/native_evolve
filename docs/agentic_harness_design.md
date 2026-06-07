@@ -1,6 +1,12 @@
 # Agentic harness (#5) — design + the native verify-repair skill
 
 Status: **implemented, offline-validated, billed run pending budget sign-off** (2026-06-05, session 11).
+**Adopted as the DEPLOY-FAITHFUL HEADLINE for memory claims (design decision (a), session 15):** the
+agent self-corrects natively in its sandbox, so the harness `monotone_repair` loop is bypassed
+(`repair_calls=0`) and the agentic, repair-off run is the cleanest "memory alone == deploy" measurement.
+The harness repair loop is kept as a SEPARATE, LABELED lever (it only *stands in* for native
+self-correction where an env lacks `agentic_attempt`); see `docs/eval_protocol.md` → reporting
+discipline and `memory/self-verify-role-split.md`.
 Read `PROGRESS.md` for project state; this is the design rationale for the agentic upgrade.
 
 ## Why (the gap this closes)
