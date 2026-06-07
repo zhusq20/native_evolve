@@ -273,7 +273,35 @@ env (dyck) a no-gold gate carries no usable signal — the honest precision-law 
 case (reffree PRESERVES a gold lift) we need an env with a PRECISE reffree signal AND a robustly-beneficial
 gate-activating skill** — code→execution (but SB's gate rejects: diverse) or IFBench→in-prompt constraints (gate
 behavior there untested). That is a NEW experiment to scope, not a dyck seed. Results: `results/dyck_gate_retest.json`.
-New harness: `eval/gate_retest.py`. Total validation spend this session ≈ $14.4.
+New harness: `eval/gate_retest.py`.
+
+**IFBENCH PROBE — the COMPLEMENTARY (precise-signal) side (`results/ifbench_gateAB/`, +$3.45).** IFBench's
+reference-free signal is precise (in-prompt constraints; session-8 self==oracle). ours_full frozen 24/30/6,
+seed0, `--gate_audit`, repair off, lexical. Added `verify.signal_agreement` (per-task judge agreement, incl.
+`base_fail_agree` = agreement on the gold base-FAILURES, where a gate's rescue signal lives — a blind judge
+scores ~0 there even at high overall agreement). 1 candidate induced (`constraint-satisfaction-in-instruction
+-tasks`):
+| env | reffree signal | reffree saw gold's base-failures? | base_fail_agree | gate (both signals) |
+|---|---|---|---|---|
+| dyck | NL self-critique of bracket seq (imprecise) | 0 of 4 (SATURATED, blind; base_pass 32/32 vs gold 28) | 0.00 | reject (coincidental) |
+| IFBench | in-prompt constraints (precise) | 2 of 4; NOT saturated (reffree base_fail=8 vs gold 4) | 0.50 | reject (signal-grounded) |
+→ **PRECISION-LAW-FOR-GATING, BOTH SIDES (1-seed signal):** where the reference-free signal is PRECISE
+(IFBench), the no-gold gate TRACKS gold (sees failures, makes a signal-grounded decision); where it is
+IMPRECISE (dyck), it goes BLIND (saturated) and any agreement is coincidental. (IFBench base_fail_agree=0.50 is
+2/4 — small n_base_fail; the robust contrast is tracks-vs-blind, not the exact 0.50; ≥3 seeds would tighten it.)
+
+**SECOND ROBUST FINDING across ALL gate tests (dyck×2, IFBench, + earlier word_sorting/SB): the promotion gate
+essentially NEVER activates a durable skill.** Every induced candidate is REJECTED on held-out A/B (or, like
+session-13 dyck, "activates" on a thin non-reproducible margin). The skills induced are not robustly beneficial;
+the system gracefully degrades to memory (episodic+bullets), which is where the actual wins live (dyck ours_full
++0.198 over no_memory @ repair=0; IFBench prior +0.04–0.08). This empirically reinforces the C1 REFRAME (judge
+the GATE's discipline, not tier-count — see `memory/lit-critique-strategy.md`): the gate correctly gates skills
+OUT. ⇒ a clean "reffree PRESERVES a gold ACTIVATION" demo would need an env with BOTH a precise signal AND a
+robustly-beneficial activating skill — none of our current envs has both (SB precise-but-rejects; dyck
+activates-but-blind; IFBench precise-but-rejects). Likely needs a constructed code-FAMILY (precise exec signal +
+genuine shared procedure). **Total validation spend this session ≈ $17.9.** New: `eval/gate_retest.py`,
+`verify.{paired_ab_multi,gate_tally,signal_agreement}`, `prequential/run --gate_audit`,
+`eval/test_gate_audit.py` (16/16).
 
 ### 2026-06-07  (session 15 — DESIGN DECISION: repair-lever keep-vs-drop → user picked (a) KEEP, strictly ablated + labeled-lever discipline codified)
 Resolved the one open design decision flagged in memory (`self-verify-role-split.md` → "OPEN DECISION: the

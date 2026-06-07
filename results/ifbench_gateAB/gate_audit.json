@@ -1,0 +1,41 @@
+{
+  "idx": 23,
+  "candidates": [
+    "constraint-satisfaction-in-instruction-tasks"
+  ],
+  "oracle": {
+    "base_pass": 26,
+    "full_pass": 25,
+    "n": 30,
+    "rescued": 1,
+    "broke": 2,
+    "base_fail": 4,
+    "powered": true,
+    "beats_margin": false,
+    "not_diluting": false,
+    "saturated": false,
+    "activate": false
+  },
+  "reffree": {
+    "base_pass": 22,
+    "full_pass": 23,
+    "n": 30,
+    "rescued": 3,
+    "broke": 2,
+    "base_fail": 8,
+    "powered": true,
+    "beats_margin": false,
+    "not_diluting": true,
+    "saturated": false,
+    "activate": false
+  },
+  "agree": true,
+  "signal_agreement": {
+    "base_agree": 0.733,
+    "full_agree": 0.733,
+    "base_fail_agree": 0.5,
+    "n_base_fail": 4,
+    "n": 30
+  },
+  "live_signal": "oracle"
+}
