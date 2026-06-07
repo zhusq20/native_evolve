@@ -61,36 +61,59 @@ def multi_arm(arms, tasks, env, allowed_tools="Read"):
     return {"counts": counts, "n": len(tasks), "rows": rows}
 
 
-def paired_ab(skill_block, base_block_fn, tasks, env, allowed_tools="Read", workers=1):
+def paired_ab(skill_block, base_block_fn, tasks, env, allowed_tools="Read", workers=1,
+              judge=None, solve_fn=None):
     """Paired with/without-skill A/B on the SAME tasks (difficulty held fixed). Returns per-task
-    {base_em, full_em}. Fans out at `workers` concurrent requests (no writes)."""
+    {base_em, full_em}. Fans out at `workers` concurrent requests (no writes).
+
+    To eliminate any train(gate)/inference MISMATCH, solve & skill-presentation default to the way
+    real inference works and can be overridden to match it exactly:
+      * `solve_fn(task, mem_block) -> resp`: the harness's REAL solve path (single-shot + repair, or
+        agentic), so a skill is judged on the repaired/agentic answer it will ACTUALLY face at
+        serving — not a bare single-shot. Default = bare single-shot call (back-compat).
+      * `skill_block`: a per-task CALLABLE (task->str) rendered like the inference skill block, OR a
+        static string. It is appended AFTER the base block (base = episodic+distilled, skill LAST),
+        matching inference's inject() order (episodic, distilled, skills).
+      * `judge(task, resp) -> bool`: the CORRECTNESS SIGNAL. Default = GOLD (env.score em == 1.0), the
+        measurement/oracle a real deployment lacks; pass a REFERENCE-FREE judge (self_verify ok) for
+        the deploy-faithful gate (see prequential `--gate_signal`)."""
+    if judge is None:
+        judge = lambda task, resp: env.score(task, resp)["em"] == 1.0
+    if solve_fn is None:
+        solve_fn = lambda task, mem: llm.call_claude(env.build_prompt(task, mem),
+                                                     allowed_tools=allowed_tools)
+
     def one(t):
         b = base_block_fn(t) if callable(base_block_fn) else (base_block_fn or "")
-        full = (skill_block + "\n\n" + b) if b else skill_block
+        sb = skill_block(t) if callable(skill_block) else (skill_block or "")
+        full = "\n\n".join(x for x in (b, sb) if x)        # base THEN skill (inference inject() order)
         try:
-            rb = llm.call_claude(env.build_prompt(t, b), allowed_tools=allowed_tools)
+            rb = solve_fn(t, b)
         except Exception:
             rb = ""
         try:
-            rf = llm.call_claude(env.build_prompt(t, full), allowed_tools=allowed_tools)
+            rf = solve_fn(t, full)
         except Exception:
             rf = ""
-        return {"base_em": int(env.score(t, rb)["em"] == 1.0),
-                "full_em": int(env.score(t, rf)["em"] == 1.0)}
+        return {"base_em": int(bool(judge(t, rb))),
+                "full_em": int(bool(judge(t, rf)))}
     return llm.pmap(one, tasks, workers)
 
 
-def lift_over_base(skill_block, base_block_fn, tasks, env, allowed_tools="Read", workers=1):
+def lift_over_base(skill_block, base_block_fn, tasks, env, allowed_tools="Read", workers=1,
+                   judge=None, solve_fn=None):
     """The explicit consolidation gate: does ADDING skill_block on top of the episodic+
     distilled BASE injection raise held-out accuracy? Consolidation must EARN its place by
     beating the episodic-first baseline (per the agentic-memory finding); otherwise the
-    system degrades gracefully to base-only. Returns (base_pass, full_pass, n)."""
-    rows = paired_ab(skill_block, base_block_fn, tasks, env, allowed_tools, workers)
+    system degrades gracefully to base-only. Returns (base_pass, full_pass, n). `judge` selects
+    the correctness signal (default GOLD; reference-free for the deploy-faithful gate); `solve_fn`
+    selects the solve path (default bare single-shot; pass the real solve() to match inference)."""
+    rows = paired_ab(skill_block, base_block_fn, tasks, env, allowed_tools, workers, judge, solve_fn)
     return sum(r["base_em"] for r in rows), sum(r["full_em"] for r in rows), len(rows)
 
 
 def rolling_gate(skill_block, base_block_fn, tasks, env, state_path, allowed_tools="Read",
-                 workers=1, min_n=18, margin=2):
+                 workers=1, min_n=18, margin=2, judge=None, solve_fn=None):
     """Online consolidation gate: ACCUMULATE paired A/B evidence ACROSS consolidation checkpoints
     (persisted in `state_path`) and activate skills only on a sufficiently-powered, dilution-guarded
     lift over the episodic+distilled base. Fixes the one-shot tiny/saturated-val gate's two failure
@@ -99,8 +122,13 @@ def rolling_gate(skill_block, base_block_fn, tasks, env, state_path, allowed_too
     base-failure rescue / saturation signal so a no-headroom val reads as INCONCLUSIVE (keep skills
     as candidates, graceful degrade) instead of a silent false-REJECT.
 
+    `judge` selects the correctness signal (default GOLD env.score; pass a reference-free judge —
+    self_verify ok — for the deploy-faithful gate, per prequential `--gate_signal`). `solve_fn`
+    selects the solve path (default bare single-shot; pass the harness's real solve() so skills are
+    judged under the SAME repair/agentic conditions inference uses — no train/inference mismatch).
+
     Returns (base_cum, full_cum, n_cum, activate, info)."""
-    rows = paired_ab(skill_block, base_block_fn, tasks, env, allowed_tools, workers)
+    rows = paired_ab(skill_block, base_block_fn, tasks, env, allowed_tools, workers, judge, solve_fn)
     bp = sum(r["base_em"] for r in rows)
     fp = sum(r["full_em"] for r in rows)
     n = len(rows)

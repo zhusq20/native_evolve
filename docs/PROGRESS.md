@@ -203,6 +203,55 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-07  (session 14 — 6-paper review → the "reference-free signal" refactor: A1/A2/A3 + gate/train alignment, NO train-inference mismatch)
+Reviewed `papers/` (MemOp / SkillOpt / CoEvoSkills / MUSE / "Useful Memories Become Faulty…" / "Harness
+Updating Is Not Harness Benefit") against our engine+eval. **All code below is unit-validated with ZERO claude
+spend** (`eval/test_signal_routing.py` 25/25 + regressions green); the billed A/B is the NEXT step.
+
+**Strategic findings (full reasoning in memory: `lit-critique-strategy.md` + `native-design-law.md`):**
+- Our DETERMINISM rule is the strongest pillar (paper5: LLM-wholesale-rewrite collapses, ARC 100→52.6). The
+  threats are (a) the abstract/skill tier rarely earns its keep (paper5 abstract-only ≤ zero-shot; paper6
+  "updating is FLAT, 9B≈Opus"; our own gate-rarely-helps) → reframe C1 around the *gate*, not tier-count; and
+  (b) attribution/validity (1–2 seed, no CI, single-solver, memory⊗repair⊗compute conflated) threatens all empirics.
+- **Code-verified correctness-signal audit:** every offline optimizer gates on GOLD at train; NONE evolves on a
+  reference-free signal at no-gold DEPLOY (offline ones freeze; "online" ones are measured in-situ on gold
+  benchmarks). CoEvoSkills proves reference-free CAN drive evolution (dense surrogate > sparse gold, −30pp).
+  ⇒ **"reference-free self-eval driving ONLINE no-gold deploy evolution" is the unfilled gap = our C2 thesis.**
+
+**THE DESIGN DECISION (north star): ONE system = the reference-free deploy loop; gold is only a read-only eval
+overlay (+ an opt-in oracle CEILING). Implemented as the SIGNAL the system's own credit/reflect/gate run on.**
+- **A1 gate / A2 credit / A3 reflect now take a SIGNAL knob** (`--gate_signal / --credit_signal /
+  --reflect_signal ∈ {reffree, oracle}`, **default `oracle` for back-compat**). `reffree` = the deploy-available
+  `self_verify` (execution / in-prompt constraints / self-critique; reads NO gold). `oracle` = GOLD (`env.score`
+  em / gold-grounded `collect_evidence` incl. the N3 semantic value-diff). Pure module-level helpers
+  (`reffree_verdict / reffree_ok / make_judge / reffree_evidence_dict`) keep routing unit-testable; the rf verdict
+  is computed AT MOST ONCE per learned task and reused for episode-success + credit + reflection across all 3
+  learn paths (sequential / serving / batched). **Honest cost of `reffree`: the gold N3 semantic reflection is
+  not deploy-faithful → it lives only on the `oracle` path** (so a `reffree` headline loses N3, by design).
+- **Gate ↔ inference ALIGNMENT (no train-inference mismatch):** the promotion gate's held-out A/B previously
+  solved with a BARE single-shot call and DUMPED all candidate skills (skills-first) — neither matched how
+  inference actually solves (single-shot **+ repair**, or agentic) or presents skills (`skills_block`: top-k by
+  relevance, 560-char-truncated, skills-LAST). Fixed: `verify.paired_ab/lift_over_base/rolling_gate` gained
+  `solve_fn` (the gate now solves via the REAL `solve()`) and a per-task callable `skill_block`; factored
+  `retrieve.render_skills_block` so the gate renders CANDIDATE skills with the EXACT same function/format/order
+  inference uses for ACTIVE skills. ⇒ a skill is now judged on the repaired/agentic answer it will actually face.
+  (For `repair_turns=0` non-agentic this is identical cost to before; the extra cost appears only where the old
+  gate was *wrong*.)
+- **external_optimizer train ↔ deploy ALIGNMENT:** `train_external` gained `solve_fn`; its offline rollouts now
+  go through the SAME `solve()` the frozen skill is deployed under (moved the training call to after `solve()` is
+  defined). No-op for single-shot; fixes the **agentic** train(bare)/deploy(multi-turn) mismatch and is more
+  faithful to SkillOpt's own multi-turn training. (Still a partial faithfulness fix — external lacks the
+  selection-gate / bounded-edits / multi-epoch / rejected-buffer; that fuller rebuild is the separate P1 item.)
+
+**Files:** `engine/evolve/{verify,retrieve}.py`, `eval/{prequential,run,external_opt}.py`; new
+`eval/test_signal_routing.py` (25/25, zero spend). **Defaults unchanged (oracle) → existing runs reproduce.**
+**Decisions:** keep `oracle` default for reproducibility; `reffree` is the deploy-faithful target; flip the
+default only after the A/B. **NEXT:** (1) the billed **`ours_full` reffree-vs-oracle A/B** (= precision-law-for-
+gating: how much of the gold gate's lift survives a no-gold gate) — the first validation of the whole refactor;
+(2) P0 stats (paired McNemar + bootstrap CI, ≥3 seeds) + the compute-matched `no_memory+best-of-k` arm;
+(3) Phase B — carry reference-free credit/gate into the deploy hooks (`promote.run` → `induce`+reference-free
+rolling-gate over replayed recent episodes) so deployed == evaluated.
+
 ### 2026-06-07  (session 13 cont. — ZebraLogic-6x6 skill-formation run COMPLETE → weak memory, skill rejected)
 Re-ran to completion with **`--batch_size 4`** (bounded-staleness parallel acquisition — the only sequential
 bottleneck; verified it routes through `learn_stream`→`batched_learn` in the frozen path). 40 puzzles, frozen

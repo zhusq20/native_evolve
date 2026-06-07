@@ -171,6 +171,33 @@ def _active_skills_with_value():
     return out
 
 
+def render_skills_block(skills, prompt, k=3):
+    """Render a list of skills [{name, md, value}] into the EXACT injection block the target sees.
+
+    Top-k by (lexical relevance to this task, then proven-ness `value`), each compacted to
+    (description, 560-char body), under the shared header, bounded at k. Factored out of
+    skills_block so the promotion GATE can present CANDIDATE skills to its held-out A/B
+    IDENTICALLY to how inference presents ACTIVE skills — same selection, truncation, framing,
+    and order — eliminating a train(gate)/inference skill-presentation mismatch.
+    """
+    if not skills:
+        return ""
+    q = _tokens(prompt)
+    scored = []
+    for s in skills:
+        overlap = len(_tokens(s.get("md", "")) & q)
+        scored.append((overlap, s.get("value", 0), s))
+    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    parts = []
+    for _, _, s in scored[:k]:
+        desc, body = _skill_summary(s.get("md", ""))
+        parts.append("### %s\n%s\n%s" % (s.get("name", ""), desc, body))
+    return (
+        "Verified skills promoted from experience proven across many past tasks "
+        "(apply those relevant to this task):\n\n" + "\n\n".join(parts)
+    )
+
+
 def skills_block(prompt, k=3):
     """Inject the top-k active gated skills (tier 2), ranked by relevance then proven-ness.
 
@@ -179,24 +206,9 @@ def skills_block(prompt, k=3):
     used). This is the feedback path that makes promotion BENEFICIAL: a lesson that
     graduates from volatile top-k memory into a verified skill stays available — always.
     Bounded at k, so it stays compact (the C1 contrast with ACE's dump-everything playbook).
+    The promotion gate renders CANDIDATE skills with the SAME render_skills_block (no mismatch).
     """
-    skills = _active_skills_with_value()
-    if not skills:
-        return ""
-    q = _tokens(prompt)
-    scored = []
-    for s in skills:
-        overlap = len(_tokens(s["md"]) & q)
-        scored.append((overlap, s["value"], s))
-    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    parts = []
-    for _, _, s in scored[:k]:
-        desc, body = _skill_summary(s["md"])
-        parts.append("### %s\n%s\n%s" % (s["name"], desc, body))
-    return (
-        "Verified skills promoted from experience proven across many past tasks "
-        "(apply those relevant to this task):\n\n" + "\n\n".join(parts)
-    )
+    return render_skills_block(_active_skills_with_value(), prompt, k)
 
 
 def full_playbook_block(cap=60):

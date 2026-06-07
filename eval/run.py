@@ -23,7 +23,8 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
             deploy_workers=1, acquire_mode="sequential", learn_workers=4,
             repair_turns=0, repair_methods="ours", verify_mode="self_both",
             agentic=False, agentic_max_turns=20, native_skills="", batch_size=1,
-            retrieval="agentic"):
+            retrieval="agentic", gate_signal="oracle", credit_signal="oracle",
+            reflect_signal="oracle"):
     home = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "home"
     home.mkdir(parents=True, exist_ok=True)
     out = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "tasks.jsonl"
@@ -41,6 +42,8 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
         "--verify_mode", verify_mode,
         "--agentic_max_turns", str(agentic_max_turns), "--native_skills", native_skills,
         "--batch_size", str(batch_size), "--retrieval", retrieval,
+        "--gate_signal", gate_signal, "--credit_signal", credit_signal,
+        "--reflect_signal", reflect_signal,
         "--home", str(home), "--out", str(out),
     ]
     if agentic:
@@ -119,6 +122,16 @@ def main():
                          "Claude Code paradigm): the MODEL selects relevant items from a presented index "
                          "(+1 claude call/task, ledger-billed). lexical: bag-of-words top-k (pre-2026-06-06 "
                          "behavior; pass explicitly to reproduce older runs).")
+    ap.add_argument("--gate_signal", choices=["reffree", "oracle"], default="oracle",
+                    help="skill-promotion GATE signal. oracle (DEFAULT, back-compat): GOLD env.score "
+                         "(measurement ceiling, not deploy-available). reffree: deploy-faithful "
+                         "self_verify A/B (no gold). Run both for the precision-law-for-gating A/B.")
+    ap.add_argument("--credit_signal", choices=["reffree", "oracle"], default="oracle",
+                    help="episodic-success + bullet-CREDIT signal. oracle (DEFAULT): GOLD em. reffree: "
+                         "self_verify ok (deploy-available, no gold).")
+    ap.add_argument("--reflect_signal", choices=["reffree", "oracle"], default="oracle",
+                    help="Reflector evidence. oracle (DEFAULT): GOLD collect_evidence (incl. N3). "
+                         "reffree: reference-free verdict + repair trace (no gold; loses N3).")
     args = ap.parse_args()
 
     methods = [m.strip() for m in args.methods.split(",") if m.strip()]
@@ -138,7 +151,7 @@ def main():
                        args.induce_every, deploy_workers, args.acquire_mode, args.learn_workers,
                        args.repair_turns, args.repair_methods, args.verify_mode,
                        args.agentic, args.agentic_max_turns, args.native_skills, args.batch_size,
-                       args.retrieval)
+                       args.retrieval, args.gate_signal, args.credit_signal, args.reflect_signal)
     if args.workers <= 1:
         for m, s in jobs:
             results[m][s] = _call(m, s)

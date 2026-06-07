@@ -117,6 +117,63 @@ def monotone_repair(resp, verify, repair_call, repair_turns, make_hint):
     return result, sigs, trace, ncalls
 
 
+# ---- correctness SIGNAL: reference-free (deploy-available) vs the GOLD oracle ----
+# The self-evolving system's own credit / reflect / gate must run on a signal a REAL deployment has.
+# self_verify (execution / in-prompt constraints / self-critique) is that signal — it reads NO gold.
+# env.score (gold EM) is the OUTSIDE measurement (the eval overlay) and an opt-in oracle CEILING. These
+# helpers are module-level + pure so the routing is unit-testable (see eval/test_signal_routing.py).
+# Field context (papers/): every offline optimizer gates on GOLD; "reference-free self-eval driving
+# ONLINE deploy evolution" is the gap this makes measurable. See memory/native-design-law.md.
+
+def reffree_verdict(self_verify_fn, task, resp, env):
+    """Reference-free verdict {ok, signature, feedback}, or None when nothing was checkable."""
+    try:
+        return self_verify_fn(task, resp, env)
+    except Exception:
+        return None
+
+
+def reffree_ok(self_verify_fn, task, resp, env):
+    """Reference-free correctness bool, or None when the signal is UNAVAILABLE (caller degrades)."""
+    vr = reffree_verdict(self_verify_fn, task, resp, env)
+    return None if vr is None else bool(vr.get("ok"))
+
+
+def make_judge(signal, env, self_verify_fn):
+    """Build the gate's judge(task, resp) -> bool. signal='oracle' -> GOLD (env.score em == 1.0; the
+    measurement ceiling, NOT deploy-available). signal='reffree' -> reference-free self_verify ok
+    (deploy-available, no gold); an UNAVAILABLE verdict counts as NOT-ok, so the rolling gate's
+    margin/non-dilution guard cannot activate a skill on a missing/noisy signal (precision law)."""
+    if signal == "oracle":
+        return lambda task, resp: env.score(task, resp).get("em") == 1.0
+    return lambda task, resp: bool(reffree_ok(self_verify_fn, task, resp, env))
+
+
+def reffree_evidence_dict(task, resp, ev, vr):
+    """Deploy-faithful reflection evidence: built from the REFERENCE-FREE verdict `vr` + the repair
+    trace, NEVER from gold (no reference answer, no gold value-diff / N3 — its honest cost). Pure ->
+    testable; render with envs.render_evidence (it skips the gold/diagnosis fields this omits)."""
+    ok = None if vr is None else bool(vr.get("ok"))
+    if ok is True:
+        outcome = ("self-check PASSED (no reference-free violation detected; the answer may still be "
+                   "wrong in ways no gold-free check can see)")
+    elif ok is False:
+        outcome = "self-check FAILED: " + ((vr or {}).get("feedback", "") or "")
+    else:
+        outcome = "no reference-free check was available for this attempt"
+    d = {"outcome": outcome,
+         "task": (task.get("prompt") or task.get("question") or "")[:1500],
+         "predicted": ((ev or {}).get("predicted_answer") or resp or "")[:1500]}
+    trace = ev.get("_repair_trace") if isinstance(ev, dict) else None
+    if trace:
+        d["repair"] = ("This task needed %d self-repair round(s) before the final answer. Record a "
+                       "transferable heuristic to AVOID this failure mode up front:\n" % len(trace)
+                       + "\n".join("round %d: attempt failed [%s] — %s"
+                                   % (i, s.get("signature", ""), (s.get("feedback", "") or "")[:300])
+                                   for i, s in enumerate(trace, 1)))
+    return d
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tasks", required=True)
@@ -187,6 +244,20 @@ def main():
                          "below baseline. self: route to ONE channel by code-block (exec for code, else "
                          "critique). self_exec: dataset-agnostic, EXECUTION ONLY (no critique). oracle: "
                          "per-env verify() (dataset-AWARE ceiling/back-compat; pass explicitly for the oracle map).")
+    ap.add_argument("--gate_signal", choices=["reffree", "oracle"], default="oracle",
+                    help="correctness signal the skill-promotion GATE's held-out A/B decides on. oracle "
+                         "(DEFAULT, back-compat): GOLD env.score — the measurement ceiling, NOT available "
+                         "in a real deployment. reffree (deploy-faithful): the reference-free self_verify "
+                         "the system would actually have at deploy (reads NO gold). Run both to measure the "
+                         "gap = precision-law-for-gating. See memory/native-design-law.md.")
+    ap.add_argument("--credit_signal", choices=["reffree", "oracle"], default="oracle",
+                    help="correctness signal for episodic-success + distilled-bullet CREDIT. oracle "
+                         "(DEFAULT): GOLD em. reffree: self_verify ok (deploy-available, no gold; costs "
+                         "+1 verify call per learned task on non-code tasks).")
+    ap.add_argument("--reflect_signal", choices=["reffree", "oracle"], default="oracle",
+                    help="evidence the Reflector sees. oracle (DEFAULT): GOLD-grounded collect_evidence "
+                         "(incl. the N3 semantic value-diff). reffree: reference-free evidence (self_verify "
+                         "verdict + repair trace, NO gold) — deploy-faithful; loses N3 (its honest cost).")
     ap.add_argument("--agentic", action="store_true",
                     help="agentic solve: the target runs MULTI-TURN with Read/Write/Bash/Skill in a "
                          "per-task gold-isolated sandbox (writes, RUNS, and repairs its own code) "
@@ -261,11 +332,9 @@ def main():
             all_tasks, (args.n, args.train_n, args.verify_n), args.seed, args.stratify_key)
 
     # external_optimizer: pay the offline training cost up front, then freeze one skill.
+    # (The actual training runs AFTER solve() is defined — below — so its rollouts go through the SAME
+    # solve path the frozen skill is deployed under: no train/inference mismatch. See note near `out=`.)
     frozen_skill = ""
-    if args.method == "external_optimizer":
-        sys.stderr.write("[external_optimizer seed%d] offline training on %d tasks...\n"
-                         % (args.seed, len(train_tasks)))
-        frozen_skill = external_opt.train_external(train_tasks, env, workers=args.deploy_workers)
 
     def cum_cost():
         c = t = 0.0
@@ -302,16 +371,27 @@ def main():
         cands = induce.induce(focus_failures=True)
         if not cands:
             return
-        skill_block = "## Candidate skills (apply if relevant):\n\n" + "\n\n".join(c["md"] for c in cands)
+        # NO train/inference MISMATCH (skill presentation): show CANDIDATE skills to the gate EXACTLY
+        # as inference shows ACTIVE skills — same render_skills_block (top-k by relevance, compacted,
+        # same header), appended AFTER the episodic+distilled base (skill LAST), per inject() order.
+        cand_skills = [{"name": c["name"], "md": c["md"], "value": 0} for c in cands]
+        skill_block_fn = lambda t: retrieve.render_skills_block(cand_skills, t["question"], k=3)
+        # NO train/inference MISMATCH (solve path): judge the A/B via the harness's REAL serve path
+        # (single-shot + repair, or agentic) so a skill is rated on the answer it will ACTUALLY face
+        # at inference, not a bare single-shot. (For repair_turns=0 this is identical cost to before.)
+        gate_solve = lambda task, mem: solve(task, mem, want_cost=True)[0]
+        # GATE SIGNAL (A1): reffree = deploy-faithful self_verify A/B (no gold); oracle = GOLD env.score.
+        gate_judge = make_judge(args.gate_signal, env, self_verify_mod.self_verify)
         bp, fp, vn, activate, info = verify.rolling_gate(
-            skill_block, base_block, verify_tasks, env,
+            skill_block_fn, base_block, verify_tasks, env,
             state_path=str(home / "memory" / "gate_window.json"),
-            workers=args.deploy_workers, min_n=args.gate_min_n, margin=args.gate_margin)
+            workers=args.deploy_workers, min_n=args.gate_min_n, margin=args.gate_margin,
+            judge=gate_judge, solve_fn=gate_solve)
         for c in cands:
             induce.write_skill(c, status=("active" if activate else "candidate"))
-        sys.stderr.write("[consolidate @%d] rolling gate: cum base %d -> +skills %d (n=%d, "
+        sys.stderr.write("[consolidate @%d] rolling gate (%s): cum base %d -> +skills %d (n=%d, "
                          "rescued=%d broke=%d sat=%s) => %s\n"
-                         % (idx, bp, fp, vn, info["rescued"], info["broke"],
+                         % (idx, args.gate_signal, bp, fp, vn, info["rescued"], info["broke"],
                             info["decision"]["saturated"],
                             ("ACTIVATE %d skills" % len(cands)) if activate
                             else "REJECT/candidate (degrade)"))
@@ -448,6 +528,26 @@ def main():
             mem = ""                                            # no_memory
         return mem, injected_ids
 
+    def _learn_signals(task, resp, ev):
+        """(success_bool, reflect_evidence_str) for a learned task under --credit_signal/--reflect_signal.
+        reffree = deploy-available self_verify (NO gold; the system's own signal); oracle = GOLD
+        (env.score em / gold-grounded collect_evidence, incl. N3). The reference-free verdict is computed
+        AT MOST ONCE and reused for both the success flag (episode + credit, A2) and the reflection
+        evidence (A3). `success` is the credit signal; on a rare UNAVAILABLE reffree verdict it falls
+        back to gold so the episode still records a label."""
+        vr = None
+        if args.credit_signal == "reffree" or args.reflect_signal == "reffree":
+            vr = reffree_verdict(self_verify_mod.self_verify, task, resp, env)
+        if args.credit_signal == "oracle" or vr is None:
+            succ = (ev.get("em") == 1.0)
+        else:
+            succ = bool(vr.get("ok"))
+        if args.reflect_signal == "oracle":
+            evi = envs_pkg.render_evidence(envs_pkg.collect_evidence(env, task, resp, ev))
+        else:
+            evi = envs_pkg.render_evidence(reffree_evidence_dict(task, resp, ev, vr))
+        return succ, evi
+
     def process(task, idx, learn, phase):
         """One task: inject -> target call -> score. If learn, update memory (record/credit/reflect).
         Deployment (learn=False) is pure inference on a FROZEN store: the held-out test phase."""
@@ -456,24 +556,26 @@ def main():
         resp, ev, meta = solve(task, mem_block)
 
         if learn:
+            # ONE reference-free verdict per learned task (deploy-available), reused for episode-success,
+            # credit (A2), and reflection evidence (A3). Computed only when a reffree signal is selected.
+            succ, evi = _learn_signals(task, resp, ev)
             # record the RAW EPISODE (episodic-first methods): first-class, append-only
             if args.method in ("episodic", "ours_full"):
                 try:
-                    episodic.record(task["id"], q, resp, ev["em"] == 1.0,
+                    episodic.record(task["id"], q, resp, succ,
                                     signature=(ev.get("_repair_signatures") or [""])[-1])
                 except Exception as exc:
                     sys.stderr.write("episode record error @%d: %s\n" % (idx, exc))
-            # credit distilled bullets that were injected (deterministic presence/gold)
+            # credit distilled bullets that were injected (deterministic; A2 signal = --credit_signal)
             if args.method in ("ours_mem", "ours_full") and injected_ids:
                 try:
-                    curate.credit(injected_ids, ev["em"] == 1.0)
+                    curate.credit(injected_ids, succ)
                 except Exception as exc:
                     sys.stderr.write("credit error @%d: %s\n" % (idx, exc))
             # reflect -> distilled memory (promote_skills=False: consolidation is the gated induce step)
             if args.method in ("ours_mem", "ours_full", "ace"):
                 try:
-                    reflect.run(summary=envs_pkg.render_evidence(
-                        envs_pkg.collect_evidence(env, task, resp, ev)), promote_skills=False)
+                    reflect.run(summary=evi, promote_skills=False)
                 except Exception as exc:
                     sys.stderr.write("reflect error @%d: %s\n" % (idx, exc))
 
@@ -572,16 +674,17 @@ def main():
 
         def learn_job(task, resp, ev, injected_ids):
             deltas = []
+            # reffree verdict + reflection evidence (A2/A3) OUTSIDE the lock — the expensive parallel half
+            succ, evi = _learn_signals(task, resp, ev)
             if args.method in ("ours_mem", "ours_full", "ace"):
                 try:
-                    deltas = reflect.reflect_deltas(envs_pkg.render_evidence(
-                        envs_pkg.collect_evidence(env, task, resp, ev)))   # parallel (no lock)
+                    deltas = reflect.reflect_deltas(evi)               # parallel (no lock)
                 except Exception as exc:
                     sys.stderr.write("reflect error: %s\n" % exc)
             with store.STORE_LOCK:                                                    # serialized + atomic
                 if args.method in ("episodic", "ours_full"):
                     try:
-                        episodic.record(task["id"], task["question"], resp, ev["em"] == 1.0,
+                        episodic.record(task["id"], task["question"], resp, succ,
                                         signature=(ev.get("_repair_signatures") or [""])[-1])
                     except Exception as exc:
                         sys.stderr.write("episode record error: %s\n" % exc)
@@ -592,7 +695,7 @@ def main():
                         sys.stderr.write("curate error: %s\n" % exc)
                 if args.method in ("ours_mem", "ours_full") and injected_ids:
                     try:
-                        curate.credit(injected_ids, ev["em"] == 1.0)
+                        curate.credit(injected_ids, succ)
                     except Exception as exc:
                         sys.stderr.write("credit error: %s\n" % exc)
 
@@ -652,29 +755,30 @@ def main():
             mem_at = len(store.load())
             mem_block, injected_ids = inject(task)
             resp, ev, meta = solve(task, mem_block, want_cost=True)
+            succ, evi = _learn_signals(task, resp, ev)         # reffree verdict computed in PARALLEL
             return {"idx": idx, "task": task, "resp": resp, "ev": ev, "meta": meta,
-                    "ids": injected_ids, "mem_at": mem_at}
+                    "ids": injected_ids, "mem_at": mem_at, "succ": succ, "evi": evi}
 
         for c0 in range(0, len(items), B):
             chunk = items[c0:c0 + B]
             solved = llm.pmap(_solve_only, chunk, workers)      # PARALLEL solve, shared snapshot
             for s in sorted(solved, key=lambda r: r["idx"]):    # LEARN in idx order (writes serialized)
                 task, resp, ev, meta, injected_ids = s["task"], s["resp"], s["ev"], s["meta"], s["ids"]
+                succ, evi = s["succ"], s["evi"]                  # signals computed in the parallel phase
                 if args.method in ("episodic", "ours_full"):
                     try:
-                        episodic.record(task["id"], task["question"], resp, ev["em"] == 1.0,
+                        episodic.record(task["id"], task["question"], resp, succ,
                                         signature=(ev.get("_repair_signatures") or [""])[-1])
                     except Exception as exc:
                         sys.stderr.write("episode record error @%d: %s\n" % (s["idx"], exc))
                 if args.method in ("ours_mem", "ours_full") and injected_ids:
                     try:
-                        curate.credit(injected_ids, ev["em"] == 1.0)
+                        curate.credit(injected_ids, succ)
                     except Exception as exc:
                         sys.stderr.write("credit error @%d: %s\n" % (s["idx"], exc))
                 if args.method in ("ours_mem", "ours_full", "ace"):
                     try:
-                        reflect.run(summary=envs_pkg.render_evidence(
-                            envs_pkg.collect_evidence(env, task, resp, ev)), promote_skills=False)
+                        reflect.run(summary=evi, promote_skills=False)
                     except Exception as exc:
                         sys.stderr.write("reflect error @%d: %s\n" % (s["idx"], exc))
                 run += meta["cost"]
@@ -711,6 +815,17 @@ def main():
         if args.acquire_mode == "serving" and args.method in LEARN_METHODS and args.deploy_workers > 1:
             return serve_and_learn(stream, phase)
         return run_phase(stream, learn=True, phase=phase)
+
+    # external_optimizer offline training (deferred to here so its rollouts use the SAME solve() the
+    # frozen skill is deployed under — single-shot OR repair/agentic — removing the train/inference
+    # mismatch and matching SkillOpt's own (multi-turn) training harness). Cost is paid up front onto
+    # the ledger before the eval loop, so the acc-vs-cumulative-cost (C2) curve counts it honestly.
+    if args.method == "external_optimizer":
+        sys.stderr.write("[external_optimizer seed%d] offline training on %d tasks (via solve())...\n"
+                         % (args.seed, len(train_tasks)))
+        frozen_skill = external_opt.train_external(
+            train_tasks, env, workers=args.deploy_workers,
+            solve_fn=lambda task, mem: solve(task, mem, want_cost=True)[0])
 
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

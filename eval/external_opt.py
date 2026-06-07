@@ -15,22 +15,30 @@ import json
 from evolve import config, llm
 
 
-def train_external(train_tasks, env, rounds=1, workers=1):
+def train_external(train_tasks, env, rounds=1, workers=1, solve_fn=None):
     """Run the target on train tasks, then synthesize one global SKILL.md.
 
     Returns the SKILL.md text (frozen skill injected at eval time).
     rounds>1 iterates: re-run with the current draft, re-synthesize (GEPA-like).
     env provides build_prompt/score (env-agnostic). The per-round rollouts are independent
     (no online learning), so they fan out at `workers` concurrent requests.
+
+    `solve_fn(task, mem_block) -> resp`: if given, rollouts solve via the harness's REAL solve path
+    (single-shot + repair, or agentic) instead of a bare single-shot call — so the offline-learned
+    skill is TRAINED under the SAME conditions it is DEPLOYED under (no train/inference mismatch; also
+    matches SkillOpt's own multi-turn training harness). Default = bare single-shot (back-compat;
+    identical to deploy when repair is off and non-agentic, so this only changes agentic/repair runs).
     """
     skill_md = ""
     for _ in range(max(1, rounds)):
         block = skill_md and ("## Skill (current draft)\n" + skill_md + "\n\n")
 
         def rollout(t):
-            prompt = env.build_prompt(t, block or "")
             try:
-                resp = llm.call_claude(prompt, allowed_tools="Read")
+                if solve_fn is not None:
+                    resp = solve_fn(t, block or "")
+                else:
+                    resp = llm.call_claude(env.build_prompt(t, block or ""), allowed_tools="Read")
             except Exception:
                 resp = ""
             ev = env.score(t, resp)
