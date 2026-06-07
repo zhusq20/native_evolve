@@ -100,6 +100,62 @@ def paired_ab(skill_block, base_block_fn, tasks, env, allowed_tools="Read", work
     return llm.pmap(one, tasks, workers)
 
 
+def paired_ab_multi(skill_block, base_block_fn, tasks, env, judges, allowed_tools="Read",
+                    workers=1, solve_fn=None):
+    """Like `paired_ab`, but solves base & full ONCE per task and scores each answer with MULTIPLE
+    judges, so every judge sees the IDENTICAL pair of answers. This is the clean
+    precision-law-FOR-GATING audit: comparing an oracle (gold) judge against a reference-free judge
+    on the SAME answers removes solve-stochasticity from the comparison (re-running paired_ab per
+    judge would re-solve and the answers would differ from claude noise). `judges` is a dict
+    {name: judge(task, resp)->bool}. Returns a list of per-task dicts {<name>_base, <name>_full}."""
+    if solve_fn is None:
+        solve_fn = lambda task, mem: llm.call_claude(env.build_prompt(task, mem),
+                                                     allowed_tools=allowed_tools)
+
+    def one(t):
+        b = base_block_fn(t) if callable(base_block_fn) else (base_block_fn or "")
+        sb = skill_block(t) if callable(skill_block) else (skill_block or "")
+        full = "\n\n".join(x for x in (b, sb) if x)        # base THEN skill (inference inject() order)
+        try:
+            rb = solve_fn(t, b)
+        except Exception:
+            rb = ""
+        try:
+            rf = solve_fn(t, full)
+        except Exception:
+            rf = ""
+        out = {}
+        for name, j in judges.items():
+            try:
+                out[name + "_base"] = int(bool(j(t, rb)))
+            except Exception:
+                out[name + "_base"] = 0
+            try:
+                out[name + "_full"] = int(bool(j(t, rf)))
+            except Exception:
+                out[name + "_full"] = 0
+        return out
+    return llm.pmap(one, tasks, workers)
+
+
+def gate_tally(rows, name, min_n=18, margin=2):
+    """Tally one judge's paired_ab_multi rows into the SAME accept rule rolling_gate uses for a
+    single (non-accumulated) round: powered ∧ beats-margin ∧ not-diluting. Returns the decision dict."""
+    bp = sum(r[name + "_base"] for r in rows)
+    fp = sum(r[name + "_full"] for r in rows)
+    n = len(rows)
+    base_fail = [r for r in rows if r[name + "_base"] == 0]
+    rescued = sum(1 for r in base_fail if r[name + "_full"] == 1)
+    broke = sum(1 for r in rows if r[name + "_base"] == 1 and r[name + "_full"] == 0)
+    powered = n >= min_n
+    beats = (fp - bp) >= margin
+    not_diluting = broke <= rescued
+    return {"base_pass": bp, "full_pass": fp, "n": n, "rescued": rescued, "broke": broke,
+            "base_fail": len(base_fail), "powered": powered, "beats_margin": beats,
+            "not_diluting": not_diluting, "saturated": len(base_fail) == 0,
+            "activate": bool(powered and beats and not_diluting)}
+
+
 def lift_over_base(skill_block, base_block_fn, tasks, env, allowed_tools="Read", workers=1,
                    judge=None, solve_fn=None):
     """The explicit consolidation gate: does ADDING skill_block on top of the episodic+

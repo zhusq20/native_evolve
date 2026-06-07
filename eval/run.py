@@ -24,7 +24,7 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
             repair_turns=0, repair_methods="ours", verify_mode="self_both",
             agentic=False, agentic_max_turns=20, native_skills="", batch_size=1,
             retrieval="agentic", gate_signal="oracle", credit_signal="oracle",
-            reflect_signal="oracle"):
+            reflect_signal="oracle", gate_audit=False):
     home = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "home"
     home.mkdir(parents=True, exist_ok=True)
     out = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "tasks.jsonl"
@@ -48,6 +48,8 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
     ]
     if agentic:
         cmd.append("--agentic")
+    if gate_audit:
+        cmd.append("--gate_audit")
     subprocess.run(cmd, env=env, check=True)
     return [json.loads(l) for l in out.read_text().splitlines() if l.strip()]
 
@@ -135,6 +137,9 @@ def main():
     ap.add_argument("--reflect_signal", choices=["reffree", "oracle"], default="oracle",
                     help="Reflector evidence. oracle (DEFAULT): GOLD collect_evidence (incl. N3). "
                          "reffree: reference-free verdict + repair trace (no gold; loses N3).")
+    ap.add_argument("--gate_audit", action="store_true",
+                    help="precision-law-for-gating audit: log BOTH gate signals (oracle vs reffree) on "
+                         "the SAME val A/B answers to home/gate_audit.json (live decision = --gate_signal).")
     args = ap.parse_args()
 
     methods = [m.strip() for m in args.methods.split(",") if m.strip()]
@@ -154,7 +159,8 @@ def main():
                        args.induce_every, deploy_workers, args.acquire_mode, args.learn_workers,
                        args.repair_turns, args.repair_methods, args.verify_mode,
                        args.agentic, args.agentic_max_turns, args.native_skills, args.batch_size,
-                       args.retrieval, args.gate_signal, args.credit_signal, args.reflect_signal)
+                       args.retrieval, args.gate_signal, args.credit_signal, args.reflect_signal,
+                       args.gate_audit)
     if args.workers <= 1:
         for m, s in jobs:
             results[m][s] = _call(m, s)

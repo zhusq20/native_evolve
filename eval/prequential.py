@@ -209,6 +209,12 @@ def main():
     ap.add_argument("--gate_margin", type=int, default=2,
                     help="rolling gate: required cumulative (with-skill minus base) passes; combined "
                          "with a non-dilution guard (broke <= rescued) to kill false-positives.")
+    ap.add_argument("--gate_audit", action="store_true",
+                    help="precision-law-FOR-GATING audit: at the consolidation gate, solve the val A/B "
+                         "ONCE and score it with BOTH the oracle (gold) AND the reffree (self_verify) "
+                         "judge on the IDENTICAL answers, logging both decisions to home/gate_audit.json "
+                         "(clean shared-acquisition isolation of the gate signal). The LIVE decision "
+                         "still follows --gate_signal. No-op when no candidate is induced.")
     ap.add_argument("--deploy_workers", type=int, default=1,
                     help="concurrent claude requests for NO-WRITES phases (frozen test deploy; "
                          "and no_memory/external in prequential). Up to ~64; the runner derives "
@@ -386,6 +392,36 @@ def main():
         # at inference, not a bare single-shot. (For repair_turns=0 this is identical cost to before.)
         gate_solve = lambda task, mem: solve(task, mem, want_cost=True)[0]
         # GATE SIGNAL (A1): reffree = deploy-faithful self_verify A/B (no gold); oracle = GOLD env.score.
+        if getattr(args, "gate_audit", False):
+            # PRECISION-LAW-FOR-GATING audit: solve the val A/B ONCE, score with BOTH judges on the
+            # IDENTICAL answers (clean isolation of the gate SIGNAL — re-solving per judge would
+            # re-introduce claude noise). The live decision follows --gate_signal, derived from the
+            # SAME rows (no double-solve).
+            judges = {"oracle": make_judge("oracle", env, self_verify_mod.self_verify),
+                      "reffree": make_judge("reffree", env, self_verify_mod.self_verify)}
+            rows = verify.paired_ab_multi(skill_block_fn, base_block, verify_tasks, env, judges,
+                                          workers=args.deploy_workers, solve_fn=gate_solve)
+            t_or = verify.gate_tally(rows, "oracle", min_n=args.gate_min_n, margin=args.gate_margin)
+            t_rf = verify.gate_tally(rows, "reffree", min_n=args.gate_min_n, margin=args.gate_margin)
+            agree = (t_or["activate"] == t_rf["activate"])
+            audit = {"idx": idx, "candidates": [c["name"] for c in cands],
+                     "oracle": t_or, "reffree": t_rf, "agree": agree, "live_signal": args.gate_signal}
+            try:
+                (home / "memory" / "gate_audit.json").write_text(json.dumps(audit, indent=2),
+                                                                 encoding="utf-8")
+            except Exception as exc:
+                sys.stderr.write("gate_audit write error: %s\n" % exc)
+            activate = (t_rf if args.gate_signal == "reffree" else t_or)["activate"]
+            for c in cands:
+                induce.write_skill(c, status=("active" if activate else "candidate"))
+            sys.stderr.write(
+                "[gate_audit @%d] %d cand(s) | ORACLE rescued=%d broke=%d (full-base=%d) act=%s | "
+                "REFFREE rescued=%d broke=%d (full-base=%d) act=%s | AGREE=%s | live=%s\n"
+                % (idx, len(cands),
+                   t_or["rescued"], t_or["broke"], t_or["full_pass"] - t_or["base_pass"], t_or["activate"],
+                   t_rf["rescued"], t_rf["broke"], t_rf["full_pass"] - t_rf["base_pass"], t_rf["activate"],
+                   agree, args.gate_signal))
+            return
         gate_judge = make_judge(args.gate_signal, env, self_verify_mod.self_verify)
         bp, fp, vn, activate, info = verify.rolling_gate(
             skill_block_fn, base_block, verify_tasks, env,
