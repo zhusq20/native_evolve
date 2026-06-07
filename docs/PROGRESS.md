@@ -209,6 +209,61 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-07  (session 16 — BUILT the ARC-AGI Stream env: the precise-signal + family-structure regime the gate needs; zero spend, fully validated; + the "can we just turn knobs?" analysis)
+The session-15 conclusion was that NO current env has BOTH a PRECISE reference-free signal AND a robustly-
+beneficial gate-activating skill (SB precise-but-rejects; dyck activates-but-blind; IFBench precise-but-rejects),
+so a clean "reffree gate PRESERVES a gold ACTIVATION" demo needs a new regime. Two threads this session.
+
+**Thread A — analysis the user asked for: can we ACTIVATE skills by expanding n / shrinking the induce
+interval, instead of a new benchmark? Answer: NO — those knobs don't touch our binding constraint.** Read the
+real gate (`verify.rolling_gate` + `prequential.consolidate`). Activation rule = `powered(n_cum≥18) ∧
+beats(full−base≥2 cum) ∧ not_diluting(broke≤rescued cum)`. Two DISTINCT "gate never fires" modes that respond
+OPPOSITELY to more n / more rounds: **(A) no candidate drafted** (the old SB n=16 `helpful≥5` caveat) — more
+n/shorter interval HELPS; **(B) candidate drafted but the A/B REJECTS it** (dyck/IFBench/SB now) — the skill is
+net-NEUTRAL on held-out val, so more n drives (full−base)→its true ~0 making `beats≥2` HARDER, and more rounds
+converge the rolling state to reject FASTER (the gate getting correctly conservative; session-13's rescued4/broke2
+"activation" re-measured to 4/4). The eval path is firmly Mode B (consolidate induces candidates directly from the
+failure digest, no `helpful≥5` step; n already 32≫18). So: **expanding n improves VALIDITY, doesn't create
+activations; shrinking the interval gives more but LOWER-evidence candidates + faster-converging rejection** (for
+skill QUALITY you'd LENGTHEN the interval). The binding constraint is skill-marginal-value-over-memory + val
+headroom (base failures to rescue) = a TASK-REGIME property → needs a regime change, not a knob. (Cheaper middle
+path noted: a HARDER SLICE of an existing symbolic env un-saturates word_sorting + makes the procedure necessary.)
+
+**Thread B — benchmark inventory of papers/ + decision.** Inventoried the 6 papers' benchmarks (agent-extracted):
+P1 MemOp=SWE-bench Verified; P2 SkillOpt=**SearchQA+SpreadsheetBench**(ours)+DocVQA/LiveMath/OfficeQA/ALFWorld;
+P3 CoEvoSkills + P4 MUSE + P6 = **SkillsBench** (the de-facto agent-skill standard, Docker verifier, 87 tasks×11
+domains); P5 = **ARC-AGI Stream** + ALFWorld/ScienceWorld/WebShop. Candidates with BOTH a precise/executable signal
+AND shared-procedure families: SkillsBench (best but Docker-heavy), **ARC-AGI Stream (lightweight, explicit
+family/skill taxonomy, programmatic grid check)**, SWE-bench (heavy). **User chose ARC-AGI Stream.**
+
+**BUILT (self-contained, NO ARC-GEN/Docker/network; pure Py3.9 + numpy; ZERO claude spend):**
+- `eval/envs/arc_gen.py` — procedural generator re-derived from P5's Tables 5–6 + App. B.2. Two latent axes:
+  **FAMILY** (selection rule: which connected objects participate) × **SKILL** (per-object transform), composited
+  on a blank canvas (unselected objects dropped). v1 = **7 skills** {keep, recolor, translate, flip_horizontal,
+  border, mark_center, hollow} × **3 families** {color_property, largest, group_by_shape} = 21 latent rules; P5's
+  other 3 families {inside_frame, key_marker (conditional), compose_horizontal (2-panel)} DEFERRED to v2. `apply_rule`
+  IS the ground truth; `reference_solver_src()` emits a self-contained `solve()` that reproduces it.
+- `eval/envs/arc.py` — env conforming to the interface. Task = few-shot **program synthesis** (`def solve(grid)`),
+  grids list[list[int]] colors 0–9. **TWO deliberately-distinct signals:** `score()` = ORACLE (run solve on HELD-OUT
+  test inputs → exact-match EM + cell-F1); `try_run()` = REFERENCE-FREE (run solve on the SHOWN demos → the PRECISE
+  self_verify EXECUTION channel — `self_verify` routes here because the answer carries a code block, so the gate gets
+  execution, NOT dyck's blind NL self-critique). Subprocess exec runner (12s timeout, crash/loop-safe). `verify()` =
+  ref-free structural (code block defines solve); `evidence/summarize` = per-FAMILY procedure-focused reflection.
+  Design: NO helpers provided to the agent (max headroom; the induced skill can teach the extract-objects+select
+  procedure).
+- `eval/test_arc_env.py` (**27/27, zero spend**) — headline = SELF-CONSISTENCY across ALL 21 (family,skill): the
+  emitted reference solver reproduces every demo AND held-out test via the real exec runner (proves tasks are
+  program-solvable + generator↔runner agree). Plus oracle-vs-wrong, the 4 try_run cases (pass/crash/wrong/timeout/
+  no-code), verify, prompt, evidence, load_tasks.
+- `eval/data/arc_val.jsonl` (tracked, 647K, seed 0, 60 tasks balanced over families/skills). Re-gen:
+  `python3 eval/fetch.py --env arc --n 60`. Wired via the by-module-name dispatcher (`--env arc`, no registration);
+  verified end-to-end through `envs.get_env` (load/prompt/score/try_run/collect_evidence all green).
+
+**NEXT (the billed step — GATED on user before spend): a no_memory HEADROOM PROBE** (small n) to confirm haiku has
+headroom on ARC program-synthesis (not floored ~0, not ceiling ~1.0). Difficulty knobs if needed: grid size, n_demos,
+provide-helpers. Only if headroom is good → the ours_full vs no_memory + `--gate_audit` run (the precision-law-for-
+gating POSITIVE case: does a PRECISE reffree gate PRESERVE a gold skill activation?). Then ≥3 seeds + P0 stats.
+
 ### 2026-06-07  (session 15 cont. — VALIDATION EXPERIMENT: clean precision-law-FOR-GATING audit on dyck → mechanism works; 1-seed AGREE-on-reject + a measured reffree precision gap; discriminating ACTIVATE case still pending)
 Ran the first billed validation of the session-14 reference-free refactor: the `ours_full` reffree-vs-oracle
 GATE A/B (does a no-gold gate make the same accept/reject decision as the gold gate?). **Budget gate honored**
