@@ -1,0 +1,31 @@
+{
+  "candidate": "dyck-language-stack-algorithm",
+  "n_val": 32,
+  "oracle": {
+    "base_pass": 28,
+    "full_pass": 28,
+    "n": 32,
+    "rescued": 4,
+    "broke": 4,
+    "base_fail": 4,
+    "powered": true,
+    "beats_margin": false,
+    "not_diluting": true,
+    "saturated": false,
+    "activate": false
+  },
+  "reffree": {
+    "base_pass": 32,
+    "full_pass": 31,
+    "n": 32,
+    "rescued": 0,
+    "broke": 1,
+    "base_fail": 0,
+    "powered": true,
+    "beats_margin": false,
+    "not_diluting": false,
+    "saturated": true,
+    "activate": false
+  },
+  "agree": true
+}

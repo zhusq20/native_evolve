@@ -248,9 +248,32 @@ NEUTRAL skill this run (session-13's run induced a BENEFICIAL one, rescued=4/bro
 reffree PRECISION GAP is visible in the numbers:** reffree judged 31/32 base answers as ok where gold says only
 29/32 — it MISSED 2 of the 3 genuine failures (over-lenient self-critique on bracket sequences). Latent here
 (skill neutral) but exactly the failure mode that would make a reffree gate UNDER-fire on a beneficial skill =
-the precision-law-for-gating boundary. **NEXT: get the discriminating ACTIVATE case** — cheapest = a targeted
-re-test of session-13's already-ACTIVATED candidate (`dyck-language-stack-algorithm`) via `paired_ab_multi`
-with both judges (~$2); or +N dyck seeds until one induces a beneficial skill, then read the reffree decision.
+the precision-law-for-gating boundary.
+
+**TARGETED RE-TEST (the discriminating case; `eval/gate_retest.py`, +$4):** loaded session-13's ALREADY-
+ACTIVATED candidate `dyck-language-stack-algorithm` on top of its acquired episodic+distilled base and ran
+`paired_ab_multi` (both judges, SAME val answers, repair off, n_val=32):
+| signal | base_pass | full_pass | rescued | broke | base_fail | activate |
+|---|---|---|---|---|---|---|
+| oracle (gold) | 28/32 | 28/32 | 4 | 4 | 4 | False |
+| reffree (self-critique) | 32/32 | 31/32 | 0 | 1 | 0 (SATURATED) | False |
+**Two findings, both important:**
+1. **Precision-law-for-gating CONFIRMED, concretely:** on dyck the reffree self-critique is so LENIENT it
+   passed ALL 32 base answers (saturated, base_fail=0) — BLIND to the 4 failures gold catches. Across the
+   clean run + retest it over-passed every time (gold-fail 3→reffree-saw-1, then gold-fail 4→reffree-saw-0). A
+   gate that sees no failures has NO signal to gate on. ⇒ the reference-free gate is trustworthy ONLY where the
+   signal is precise (execution↔code, in-prompt-constraints↔instruction-following); NL self-critique of bracket
+   sequences is NOT, so the no-gold gate degrades to blind. `agree=True` (both reject) is COINCIDENTAL — oracle
+   rejects because the skill is net-neutral, reffree because it's blind.
+2. **The session-13 "first durable gate activation" was a THIN, NON-REPRODUCIBLE margin:** this same skill is
+   net-NEUTRAL on re-measurement (gold rescued=4/broke=4) vs session-13's rescued=4/broke=2 → at n=32 the ±2 is
+   noise. That activation should NOT be cited as a robust skill win.
+**Net:** the session-14 reffree-gate refactor works MECHANICALLY (audit validated), but on an imprecise-signal
+env (dyck) a no-gold gate carries no usable signal — the honest precision-law boundary. **To get the POSITIVE
+case (reffree PRESERVES a gold lift) we need an env with a PRECISE reffree signal AND a robustly-beneficial
+gate-activating skill** — code→execution (but SB's gate rejects: diverse) or IFBench→in-prompt constraints (gate
+behavior there untested). That is a NEW experiment to scope, not a dyck seed. Results: `results/dyck_gate_retest.json`.
+New harness: `eval/gate_retest.py`. Total validation spend this session ≈ $14.4.
 
 ### 2026-06-07  (session 15 — DESIGN DECISION: repair-lever keep-vs-drop → user picked (a) KEEP, strictly ablated + labeled-lever discipline codified)
 Resolved the one open design decision flagged in memory (`self-verify-role-split.md` → "OPEN DECISION: the
