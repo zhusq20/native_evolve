@@ -403,9 +403,11 @@ def main():
                                           workers=args.deploy_workers, solve_fn=gate_solve)
             t_or = verify.gate_tally(rows, "oracle", min_n=args.gate_min_n, margin=args.gate_margin)
             t_rf = verify.gate_tally(rows, "reffree", min_n=args.gate_min_n, margin=args.gate_margin)
+            sig = verify.signal_agreement(rows, "oracle", "reffree")
             agree = (t_or["activate"] == t_rf["activate"])
             audit = {"idx": idx, "candidates": [c["name"] for c in cands],
-                     "oracle": t_or, "reffree": t_rf, "agree": agree, "live_signal": args.gate_signal}
+                     "oracle": t_or, "reffree": t_rf, "agree": agree,
+                     "signal_agreement": sig, "live_signal": args.gate_signal}
             try:
                 (home / "memory" / "gate_audit.json").write_text(json.dumps(audit, indent=2),
                                                                  encoding="utf-8")
@@ -416,11 +418,12 @@ def main():
                 induce.write_skill(c, status=("active" if activate else "candidate"))
             sys.stderr.write(
                 "[gate_audit @%d] %d cand(s) | ORACLE rescued=%d broke=%d (full-base=%d) act=%s | "
-                "REFFREE rescued=%d broke=%d (full-base=%d) act=%s | AGREE=%s | live=%s\n"
+                "REFFREE rescued=%d broke=%d (full-base=%d) act=%s | AGREE=%s | "
+                "signal base_agree=%.2f base_fail_agree=%.2f (gold_fail=%d) | live=%s\n"
                 % (idx, len(cands),
                    t_or["rescued"], t_or["broke"], t_or["full_pass"] - t_or["base_pass"], t_or["activate"],
                    t_rf["rescued"], t_rf["broke"], t_rf["full_pass"] - t_rf["base_pass"], t_rf["activate"],
-                   agree, args.gate_signal))
+                   agree, sig["base_agree"], sig["base_fail_agree"], sig["n_base_fail"], args.gate_signal))
             return
         gate_judge = make_judge(args.gate_signal, env, self_verify_mod.self_verify)
         bp, fp, vn, activate, info = verify.rolling_gate(

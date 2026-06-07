@@ -69,8 +69,10 @@ rows = verify.paired_ab_multi(skill_block_fn, base_block, verify_tasks, env, jud
                               workers=16, solve_fn=solve_fn)
 t_or = verify.gate_tally(rows, "oracle", min_n=18, margin=2)
 t_rf = verify.gate_tally(rows, "reffree", min_n=18, margin=2)
+sig = verify.signal_agreement(rows, "oracle", "reffree")
 out = {"candidate": "dyck-language-stack-algorithm", "n_val": len(verify_tasks),
-       "oracle": t_or, "reffree": t_rf, "agree": t_or["activate"] == t_rf["activate"]}
+       "oracle": t_or, "reffree": t_rf, "signal_agreement": sig,
+       "agree": t_or["activate"] == t_rf["activate"]}
 print(json.dumps(out, indent=2))
 OUT.write_text(json.dumps(out, indent=2), encoding="utf-8")
 print("\n-> %s" % OUT)

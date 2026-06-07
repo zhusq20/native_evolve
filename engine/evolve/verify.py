@@ -156,6 +156,23 @@ def gate_tally(rows, name, min_n=18, margin=2):
             "activate": bool(powered and beats and not_diluting)}
 
 
+def signal_agreement(rows, a, b):
+    """Per-task agreement between two judges (a vs b) over paired_ab_multi rows — the
+    PRECISION-OF-THE-SIGNAL metric. A reference-free gate can only TRACK gold if its per-task verdict
+    matches gold's per-task verdict (aggregate pass-counts can coincide while per-task verdicts diverge
+    — e.g. a saturated/blind judge). Returns fraction matching on the base answer and on the full
+    answer. (dyck: reffree blind -> low base_agree on the gold-failing tasks; IFBench: precise -> high.)"""
+    n = len(rows) or 1
+    base = sum(1 for r in rows if r[a + "_base"] == r[b + "_base"])
+    full = sum(1 for r in rows if r[a + "_full"] == r[b + "_full"])
+    # agreement restricted to the tasks gold marks as base-FAILURES (where a gate's rescue signal
+    # actually lives) — the discriminating subset; blind judges score ~0 here even at high overall agree.
+    gold_fail = [r for r in rows if r[a + "_base"] == 0]
+    fail_agree = (sum(1 for r in gold_fail if r[b + "_base"] == 0) / (len(gold_fail) or 1))
+    return {"base_agree": round(base / n, 3), "full_agree": round(full / n, 3),
+            "base_fail_agree": round(fail_agree, 3), "n_base_fail": len(gold_fail), "n": len(rows)}
+
+
 def lift_over_base(skill_block, base_block_fn, tasks, env, allowed_tools="Read", workers=1,
                    judge=None, solve_fn=None):
     """The explicit consolidation gate: does ADDING skill_block on top of the episodic+

@@ -85,6 +85,15 @@ check("reffree REJECTS (no measurable lift)", t_rf["activate"] is False)
 check("audit detects precision gap (oracle activate != reffree activate)",
       t_or["activate"] != t_rf["activate"])
 
+# (3b) signal_agreement: reffree here is BLIND (passes everything) like dyck -> it agrees on the
+# gold-PASSING tasks (ids 6..17) but on NONE of the gold base-FAILURES (ids 0..5). base_agree=12/18;
+# base_fail_agree=0/6. This is the metric that exposes a blind judge that aggregate counts would hide.
+sig = verify.signal_agreement(rows, "oracle", "reffree")
+print("   signal_agreement:", sig)
+check("signal base_agree = 12/18 (0.667)", sig["base_agree"] == round(12 / 18, 3))
+check("signal base_fail_agree = 0.0 (reffree blind to ALL gold base-failures)", sig["base_fail_agree"] == 0.0)
+check("signal n_base_fail = 6", sig["n_base_fail"] == 6)
+
 # (4) gate_tally matches rolling_gate's rule on a hand case: n=20, full-base=3>=margin2, broke<=rescued.
 synth = ([{"x_base": 0, "x_full": 1}] * 5 +          # 5 rescued
          [{"x_base": 1, "x_full": 0}] * 2 +          # 2 broke
