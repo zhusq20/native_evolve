@@ -259,13 +259,14 @@ def _sample_params(family, skill, rng):
     return p
 
 
-def _gen_scene(family, rng, params):
+def _gen_scene(family, rng, params, size_range=(12, 17), nobj_range=(3, 6)):
     """One random grid whose structure makes `family`'s selection NON-TRIVIAL (selects some but
     not all objects, with an inferable rule) and is CONSISTENT with the task-level `params`
-    (e.g. color_property scenes always contain the fixed target color). Returns the grid or None."""
-    h = int(rng.integers(12, 17))
-    w = int(rng.integers(12, 17))
-    n = int(rng.integers(3, 6))
+    (e.g. color_property scenes always contain the fixed target color). Returns the grid or None.
+    Difficulty knobs: `size_range` (grid side) and `nobj_range` (#objects), half-open [lo, hi)."""
+    h = int(rng.integers(*size_range))
+    w = int(rng.integers(*size_range))
+    n = int(rng.integers(*nobj_range))
     if family == "color_property":
         # >=1 object of the FIXED target color + >=1 of the contrast color (so selection is real).
         tgt, other = params["target_color"], params["_contrast_color"]
@@ -292,18 +293,20 @@ def _gen_scene(family, rng, params):
     return _place_objects(h, w, shapes, colors, rng)
 
 
-def gen_task(family, skill, rng, n_demos=4, n_tests=2, max_tries=200):
+def gen_task(family, skill, rng, n_demos=4, n_tests=2, max_tries=200,
+             size_range=(12, 17), nobj_range=(3, 6)):
     """Synthesize one task: K demos + M held-out tests sharing ONE latent (family, skill, params)
     rule. Returns a dict {family, skill, params, demos:[(in,out)...], tests:[(in,out)...]} with
     grids as list[list[int]]. Rejects degenerate scenes (empty selection / output == input /
-    out-of-bounds) and retries. Raises RuntimeError if it cannot build enough clean examples."""
+    out-of-bounds) and retries. Raises RuntimeError if it cannot build enough clean examples.
+    `size_range`/`nobj_range` are difficulty knobs (grid side, #objects)."""
     params = _sample_params(family, skill, rng)
     pairs = []
     tries = 0
     need = n_demos + n_tests
     while len(pairs) < need and tries < max_tries:
         tries += 1
-        grid = _gen_scene(family, rng, params)
+        grid = _gen_scene(family, rng, params, size_range=size_range, nobj_range=nobj_range)
         if grid is None:
             continue
         objs = extract_objects(grid)

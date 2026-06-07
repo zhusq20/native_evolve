@@ -230,11 +230,12 @@ def summarize(task, response, ev):
 
 
 # --------------------------------------------------------------------------- materializer
-def fetch(n, out, seed=0, n_demos=4, n_tests=2):
+def fetch(n, out, seed=0, n_demos=4, n_tests=2, size_range=(12, 17), nobj_range=(3, 6)):
     """Generate a FAMILY-STRATIFIED pool of n tasks (round-robin over family x skill so every
     latent rule recurs ~n/21 times -> shared-procedure repetition for skill formation) and write
     it as jsonl. Deterministic given `seed`. Re-generate: python3 eval/fetch.py --env arc --n 60.
-    The prequential runner does its own acquire/val/test (or prequential) split over this pool."""
+    The prequential runner does its own acquire/val/test (or prequential) split over this pool.
+    `size_range`/`nobj_range`/`n_demos` are difficulty knobs (used by the headroom probe)."""
     import numpy as np
     try:
         from . import arc_gen
@@ -249,7 +250,8 @@ def fetch(n, out, seed=0, n_demos=4, n_tests=2):
     rows = []
     for i in range(n):
         fam, sk = order[i]
-        task = arc_gen.gen_task(fam, sk, rng, n_demos=n_demos, n_tests=n_tests)
+        task = arc_gen.gen_task(fam, sk, rng, n_demos=n_demos, n_tests=n_tests,
+                                size_range=size_range, nobj_range=nobj_range)
         task["id"] = "arc-%s-%s-%03d" % (fam, sk, i)
         task["question"] = _render_demos(task["demos"])
         rows.append(task)

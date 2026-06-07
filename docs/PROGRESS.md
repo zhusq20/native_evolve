@@ -259,10 +259,30 @@ family/skill taxonomy, programmatic grid check)**, SWE-bench (heavy). **User cho
   `python3 eval/fetch.py --env arc --n 60`. Wired via the by-module-name dispatcher (`--env arc`, no registration);
   verified end-to-end through `envs.get_env` (load/prompt/score/try_run/collect_evidence all green).
 
-**NEXT (the billed step — GATED on user before spend): a no_memory HEADROOM PROBE** (small n) to confirm haiku has
-headroom on ARC program-synthesis (not floored ~0, not ceiling ~1.0). Difficulty knobs if needed: grid size, n_demos,
-provide-helpers. Only if headroom is good → the ours_full vs no_memory + `--gate_audit` run (the precision-law-for-
-gating POSITIVE case: does a PRECISE reffree gate PRESERVE a gold skill activation?). Then ≥3 seeds + P0 stats.
+**HEADROOM PROBE RESULT (no_memory, 3 difficulty tiers x n=12, haiku, repair off, ~$3.3):** healthy STRUCTURED
+headroom — NOT the ceiling we feared.
+| tier (grid/demos) | no_memory EM | cell-F1 |
+|---|---|---|
+| easy (10²/5) | 0.667 (8/12) | 0.973 |
+| med (13²/4) | 0.750 (9/12) | 0.983 |
+| hard (17²/3) | 0.750 (9/12) | 0.986 |
+EM is FLAT across tiers (grid size / n_demos are NOT the difficulty lever — the difficulty is RULE INFERENCE, not
+grid size). The ~0.70 headroom is **highly CONCENTRATED** (the ideal shape for skill formation, unlike zebra's
+scattered near-misses):
+- by FAMILY: color_property **0.87**, largest **0.92** (near-ceiling) vs **group_by_shape 0.22 (2/9)** — ALL the
+  headroom is here;
+- by SKILL: keep/recolor/hollow **1.00**, flip 0.83, vs mark_center/translate **0.67**, **border 0.44** (hardest);
+- 7 of 10 failures involve group_by_shape OR border; the group_by_shape failures are NEAR-MISSES (cell-F1 0.87–0.98)
+  = "capable but slips on the mode-shape SELECTION procedure" → systematically rescuable by a per-family procedure
+  skill (extract objects → normalize shape → pick the frequency-mode group). This is the "transferable procedure is
+  genuinely missing" case (session-13 law), NOT zebra's "capable model occasionally errs."
+Added difficulty knobs `size_range`/`nobj_range` to `arc_gen.gen_task` + `arc.fetch` (defaults unchanged → the
+committed arc_val.jsonl still reproduces). Probe (gitignored): `results/_arc_probe/`.
+
+**NEXT (the make-or-break billed run — GATED on user): a group_by_shape-FOCUSED frozen ours_full vs no_memory with
+`--gate_audit`** (the headroom family → an induced "group-by-shape selection" skill has real rescue room; precise
+exec reffree signal → the gate should TRACK gold). The precision-law-for-gating POSITIVE case we've never gotten:
+does a PRECISE reference-free gate PRESERVE a gold skill ACTIVATION? Then ≥3 seeds + P0 stats (McNemar + bootstrap CI).
 
 ### 2026-06-07  (session 15 cont. — VALIDATION EXPERIMENT: clean precision-law-FOR-GATING audit on dyck → mechanism works; 1-seed AGREE-on-reject + a measured reffree precision gap; discriminating ACTIVATE case still pending)
 Ran the first billed validation of the session-14 reference-free refactor: the `ours_full` reffree-vs-oracle
