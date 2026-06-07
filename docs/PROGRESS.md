@@ -203,21 +203,27 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
-### 2026-06-07  (session 13 cont. — ZebraLogic-6x6 skill-formation run [INCOMPLETE: ours_full killed mid-run])
-First skill-formation run on the new ZebraLogic-6x6 family (40 puzzles, frozen acquire16/val12/test12, seed0,
-no_memory vs ours_full, repair off, lexical retrieval, induce_every 8). **no_memory testEM=0.750** (F1=0.836,
-$1.43). **ours_full was KILLED after finishing all 16 acquisition tasks** ($8.08) — the orphaned bg process
-died over the 06-06→06-07 gap (box/session suspended; no error/traceback), BEFORE the @16 gate + freeze +
-test, so **no ours_full held-out number**. **Signal that DID land: the gate @7 REJECTED the induced skill
-`constraint-propagation-to-fixpoint` — broke 4 / rescued 0 on val (the skill HURTS).** And ours_full solved
-nearly all of acquisition (11–16 all em=1, only 2 distilled bullets) → little failure to learn from.
-**Reading (consistent with the 6-probe meta-finding): on a task haiku-4.5 nearly solves (0.67–0.75), an
-injected procedure-skill mostly DISRUPTS (breaks more than it rescues) → the gate correctly rejects.** So
-ZebraLogic-6x6 looks like a WEAK memory/skill regime despite ideal reuse structure — because the bottleneck
-is the model's rare slips, not a missing procedure. NEXT: either re-run ours_full to completion (~$8, to get
-the test EM + confirm), or treat this as "skill tier doesn't help where the model is already near-ceiling"
-and return to the BBH word_sorting/dyck regime (more headroom) for the skill-OFF attribution + seeds.
-Results (partial): `results/zebra6x6_skillform/` (no_memory only). Data: `eval/data/zebra_6x6.jsonl` (tracked).
+### 2026-06-07  (session 13 cont. — ZebraLogic-6x6 skill-formation run COMPLETE → weak memory, skill rejected)
+Re-ran to completion with **`--batch_size 4`** (bounded-staleness parallel acquisition — the only sequential
+bottleneck; verified it routes through `learn_stream`→`batched_learn` in the frozen path). 40 puzzles, frozen
+acquire16/val12/test12, seed0, no_memory vs ours_full, repair off, lexical, induce_every 8.
+| method | testEM | cellF1 | cost |
+|---|---|---|---|
+| no_memory | 0.750 | 0.847 | $2.19 |
+| **ours_full** | **0.833** | 0.859 | $13.38 |
+**Memory +0.083 EM** (rescued 2 / broke 1, net **+1/12**) — directionally positive but **within noise** (n=12,
+1 seed, ~0.7 SE). **The SKILL tier was REJECTED:** the gate induced two constraint-propagation skills and
+rejected BOTH (cum broke 4 / rescued 1 on val → `candidate`, no active skill), so the small lift is from the
+**2 distilled bullets, not a skill**. **Verdict: ZebraLogic-6x6 is a WEAK memory/skill regime** despite ideal
+reuse structure — haiku-4.5 near-solves it, so a procedure-skill adds little and DISRUPTS (gate correctly
+gates it out). Contrast dyck (+0.188, skill ACTIVATED) / word_sorting (+0.479) = the stronger ground. **Cost
+note: 6x6 responses avg ~28K output tokens (max ~60K) → generation-bound + pricey ($15.58 total/run).**
+**CONCLUSION on the benchmark hunt: the headroom that exists at the very hardest reasoning tasks is the WRONG
+KIND for skill formation** (model slips ≠ missing procedure). The skill tier pays off where a TRANSFERABLE
+PROCEDURE is genuinely missing (dyck's stack algorithm), not where a capable model occasionally errs.
+**NEXT: return to BBH word_sorting/dyck for the skill-OFF attribution + ≥3 seeds** (the real C1 result).
+Results: `results/zebra6x6_final/` (complete); `results/zebra6x6_skillform/` (partial, superseded).
+Data: `eval/data/zebra_6x6.jsonl` (tracked).
 
 ### 2026-06-06  (session 13 — HoVer env built, but closed-book FLOORS haiku → not viable; the headroom pattern crystallizes)
 Built **HoVer env** (`eval/envs/hover.py`, multi-hop claim verification, num_hops 2/3/4 families, binary
