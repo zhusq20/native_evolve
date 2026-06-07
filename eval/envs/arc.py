@@ -230,19 +230,24 @@ def summarize(task, response, ev):
 
 
 # --------------------------------------------------------------------------- materializer
-def fetch(n, out, seed=0, n_demos=4, n_tests=2, size_range=(12, 17), nobj_range=(3, 6)):
+def fetch(n, out, seed=0, n_demos=4, n_tests=2, size_range=(12, 17), nobj_range=(3, 6),
+          families=None, skills=None):
     """Generate a FAMILY-STRATIFIED pool of n tasks (round-robin over family x skill so every
     latent rule recurs ~n/21 times -> shared-procedure repetition for skill formation) and write
     it as jsonl. Deterministic given `seed`. Re-generate: python3 eval/fetch.py --env arc --n 60.
     The prequential runner does its own acquire/val/test (or prequential) split over this pool.
-    `size_range`/`nobj_range`/`n_demos` are difficulty knobs (used by the headroom probe)."""
+    `size_range`/`nobj_range`/`n_demos` are difficulty knobs (used by the headroom probe).
+    `families`/`skills` (lists) restrict the combo pool -> a FOCUSED stream (e.g. families=
+    ['group_by_shape'] for the headroom-family skill-formation run)."""
     import numpy as np
     try:
         from . import arc_gen
     except ImportError:  # direct (non-package) import
         import arc_gen
     rng = np.random.default_rng(seed)
-    combos = [(f, s) for f in arc_gen.FAMILIES for s in arc_gen.SKILLS]
+    fams = families or list(arc_gen.FAMILIES)
+    sks = skills or list(arc_gen.SKILLS)
+    combos = [(f, s) for f in fams for s in sks]
     order = []
     while len(order) < n:
         rng.shuffle(combos)
