@@ -317,6 +317,36 @@ Closed both:
   reference-free (no gold/env) and its held-out set is the replay cases (sparse → usually underpowered →
   stages) — the MECHANISM matches the experiment; the SIGNAL/evidence is the deploy-available analogue.
 
+**Session 19 cont. — wire the native flags through run.py + FIX the skill-OFF arm + ready-to-run ARC commands.**
+- `run.py` now FORWARDS `--memory_mode` / `--skill_turns` / `--skill_tools` / `--permission_mode` to
+  prequential (were prequential-only, so a run.py launch silently used defaults). `--permission_mode`
+  (default `bypassPermissions`) is now a real flag wired into `native_solve`'s `claude --permission-mode`
+  (was hardcoded). For ARC self-test use `--skill_tools "Skill,Read,Write,Edit,Bash"` (Bash lets the agent
+  run its solve() on the shown demos = the precise reference-free check). Tools are a GLOBAL flag → applied
+  to ALL arms → no confound.
+- **FIX (validity-critical):** the frozen post-acquire `consolidate()` (`prequential.py:~1065`) ran
+  UNCONDITIONALLY for ours_full, so `--induce_every 0` was NOT a true skill-OFF arm (it still induced+gated
+  once at end-of-acquire). Now gated on `induce_every>0` → `--induce_every 0` = genuine skill-OFF (no
+  induction at all; ours_full degrades to episodic+distilled), so the C1 skill-tier isolation is clean.
+  Corrects the session-18 memory's "skill-OFF = `--induce_every 0`" claim (it was incomplete).
+- **Ready-to-run (signals stay `oracle` = frozen+gold boundary protocol; native = deploy-faithful RETRIEVAL):**
+  - *Mechanism smoke (~$1–3, 1 seed, 1 gate):* `run.py --tasks eval/data/arc_val.jsonl --env arc
+    --methods no_memory,ours_full --protocol frozen --train_n 8 --verify_n 6 --test_n 6 --stratify_key family
+    --induce_every 12 --memory_mode native --skill_tools "Skill,Read,Write,Edit,Bash" --permission_mode
+    bypassPermissions --skill_turns 8 --seeds 0 --outdir results/arc_native_smoke --max_concurrency 8`
+    (induce_every>train_n → only the end-of-acquire consolidation fires once).
+  - *Tier-1 boundary (after smoke; TWO run.py calls — skill-OFF is also method `ours_full`, so a SEPARATE
+    outdir to avoid the shared `runs/ours_full_seed0/home`):* arm A+B = `--methods no_memory,ours_full
+    --train_n 16 --verify_n 8 --test_n 12 --induce_every 16 --outdir results/arc_boundary_t1`; arm C
+    (skill-OFF) = `--methods ours_full --induce_every 0 --outdir results/arc_boundary_t1_skilloff` (same
+    env/splits/native flags). Reads: ours_full − skill-OFF = skill-tier marginal value; skill-OFF −
+    no_memory = memory's own value. Then ≥3 seeds + `eval/stats.py` for significance.
+- **STATUS: ready to run; gated on the user.** Native + deploy-learning code committed (a0155d4, d5b0e5e,
+  c0909fd); offline suite green (materialize 17/17, deploy_learning 8/8, gate_audit 16/16, arc 38); mechanism
+  go/no-go PASSED ($0.014). Pending user decision: the uncommitted
+  `engine/skills/self-verify-and-repair/SKILL.md` (verifier-isolation edit, unrelated to this session; inert
+  for the native ARC smoke — that authored skill is excluded from the eval catalog by design).
+
 ### 2026-06-08  (session 18 — STRATEGIC PIVOT: refocus on the memory↔skill BOUNDARY (C1) under the OFFLINE frozen+gold protocol; verification line DEMOTED to supporting; zero spend this session)
 The user flagged that sessions 14–17 had drifted from the original memory/skill thesis INTO verification
 (the reference-free SIGNAL refactor → precision-law → gate audits → session-18's "native agent verifier for
