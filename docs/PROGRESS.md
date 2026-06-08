@@ -2,6 +2,8 @@
 
 Living state of the project. Newest session at the top of the Changelog.
 Read `CLAUDE.md` for how-to-work; this file is what's-been-done + what's-next.
+**For the consolidated scientific narrative (claims, the precision law + type-1/type-2 taxonomy, the
+gate-discipline reframe, the evidence map), read `docs/findings_synthesis.md`.**
 
 ---
 
