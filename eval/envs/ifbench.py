@@ -3,196 +3,33 @@
 The scoring modality the project lacked: each task is a prompt + a list of programmatically
 checkable constraints (instruction_id_list + kwargs). Scoring runs the constraint verifiers on
 the response — there is NO gold answer, the rubric IS the verifier set. That makes this the
-cleanest case for our reference-free repair loop: `verify()` runs the SAME checks the scorer
-will, so a failed attempt can be told EXACTLY which constraints it violated and fix them, with
-zero label leakage (there are no labels). em = prompt-level STRICT accuracy (all constraints
-satisfied); f1 = fraction of constraints satisfied.
+cleanest case for our reference-free repair loop AND a genuine TYPE-1 gate signal: `verify()`
+runs the SAME checks `score()` will (both call `_check_all`), so the reference-free signal ==
+the gold criterion BY CONSTRUCTION (zero label leakage — there are no labels). em = prompt-level
+STRICT accuracy (all constraints satisfied); f1 = fraction of constraints satisfied.
 
-Data = google/IFEval (541 prompts) via the HF datasets-server. Verifiers are a faithful
-stdlib-only reimplementation of the IFEval `instructions_registry`. Two instruction types are
-NOT implemented (no stdlib-faithful version): `language:response_language` (needs langdetect) and
-`length_constraints:nth_paragraph_first_word` (brittle); `fetch` FILTERS to prompts whose every
-instruction is implemented, so scoring is faithful on every retained task. Word/sentence/paragraph
-counts use regex approximations of the nltk tokenizers the official code uses (close, not identical).
+Verifiers are the OFFICIAL google-research IFEval `instructions_registry`, VENDORED verbatim into
+`eval/envs/ifeval_lib/` (like sb_lib/ vendors SkillOpt's executor) — not a reimplementation. All
+25 instruction types are supported (incl. `language:response_language` via langdetect and
+`length_constraints:nth_paragraph_first_word`). We replicate the official strict-check loop
+(`evaluation_lib.test_instruction_following_strict`): build_description(**kwargs) → re-build with
+the prompt if the instruction needs it → check_following. Deps: nltk (+punkt), langdetect,
+immutabledict, absl-py. Data = google/IFEval (541 prompts) via the HF datasets-server.
 """
 import json
 import pathlib
-import re
 import time
 import urllib.request
+
+# Vendored official IFEval registry (package-relative so it is imported as envs.ifeval_lib.*,
+# never polluting the top-level namespace — avoids shadowing stdlib `math` with our envs/math.py).
+from .ifeval_lib import instructions_registry as _registry
 
 NAME = "ifbench"
 _DS = "https://datasets-server.huggingface.co/rows"
 
-
-# ---------------- counting helpers (regex approximations of the nltk utils) ----------------
-
-def _words(text):
-    return re.findall(r"\b\w+\b", text or "")
-
-
-def _sentences(text):
-    return [s for s in re.split(r"[.!?]+", text or "") if s.strip()]
-
-
-def _paragraphs(text):
-    return [p for p in re.split(r"\n\s*\n", (text or "").strip()) if p.strip()]
-
-
-def _rel(count, relation, target):
-    r = (relation or "").lower()
-    if "at least" in r or "more than or equal" in r:
-        return count >= target
-    if "less than" in r:
-        return count < target
-    if "at most" in r or "no more than" in r:
-        return count <= target
-    if "more than" in r:
-        return count > target
-    if "exactly" in r or "equal" in r:
-        return count == target
-    return count >= target
-
-
-def _count_highlights(text):
-    num = 0
-    for m in re.findall(r"\*[^\n\*]*\*", text or ""):
-        if m.strip("*").strip():
-            num += 1
-    for m in re.findall(r"\*\*[^\n\*]*\*\*", text or ""):
-        if m.strip("*").strip():
-            num += 1
-    return num
-
-
-# ---------------- verifier registry: id -> fn(response, kwargs) -> (ok, short_description) ----------------
-
-def _v_no_comma(t, k):
-    return ("," not in t, "use NO commas anywhere")
-
-def _v_number_words(t, k):
-    n = len(_words(t)); tgt = k.get("num_words") or 0
-    return (_rel(n, k.get("relation"), tgt), "%s %d words (had %d)" % (k.get("relation"), tgt, n))
-
-def _v_number_sentences(t, k):
-    n = len(_sentences(t)); tgt = k.get("num_sentences") or 0
-    return (_rel(n, k.get("relation"), tgt), "%s %d sentences (had %d)" % (k.get("relation"), tgt, n))
-
-def _v_number_paragraphs(t, k):
-    n = len(_paragraphs(t)); tgt = k.get("num_paragraphs") or 0
-    return (n == tgt, "exactly %d paragraphs separated by blank lines (had %d)" % (tgt, n))
-
-def _v_forbidden_words(t, k):
-    low = (t or "").lower()
-    bad = [w for w in (k.get("forbidden_words") or []) if re.search(r"\b%s\b" % re.escape(w.lower()), low)]
-    return (not bad, "do NOT use the word(s): %s" % ", ".join(k.get("forbidden_words") or []))
-
-def _v_existence(t, k):
-    low = (t or "").lower()
-    missing = [w for w in (k.get("keywords") or []) if w.lower() not in low]
-    return (not missing, "must include keyword(s): %s (missing %s)" % (k.get("keywords"), missing))
-
-def _v_frequency(t, k):
-    kw = (k.get("keyword") or ""); n = len(re.findall(r"\b%s\b" % re.escape(kw.lower()), (t or "").lower()))
-    tgt = k.get("frequency") or 0
-    return (_rel(n, k.get("relation"), tgt), "keyword '%s' %s %d times (had %d)" % (kw, k.get("relation"), tgt, n))
-
-def _v_letter_frequency(t, k):
-    let = (k.get("letter") or ""); n = (t or "").lower().count(let.lower()); tgt = k.get("let_frequency") or 0
-    return (_rel(n, k.get("let_relation"), tgt), "letter '%s' %s %d times (had %d)" % (let, k.get("let_relation"), tgt, n))
-
-def _v_lowercase(t, k):
-    return (not any(c.isupper() for c in (t or "")), "all text must be lowercase")
-
-def _v_capital(t, k):
-    return (not any(c.islower() for c in (t or "")), "ALL text must be UPPERCASE")
-
-def _v_capital_word_freq(t, k):
-    n = sum(1 for w in _words(t) if w.isupper() and any(c.isalpha() for c in w)); tgt = k.get("capital_frequency") or 0
-    return (_rel(n, k.get("capital_relation"), tgt),
-            "all-caps words %s %d (had %d)" % (k.get("capital_relation"), tgt, n))
-
-def _v_title(t, k):
-    return (bool(re.search(r"<<[^>]+>>", t or "")), "include a title wrapped in <<double angular brackets>>")
-
-def _v_highlights(t, k):
-    n = _count_highlights(t); tgt = k.get("num_highlights") or 0
-    return (n >= tgt, "at least %d *highlighted* sections (had %d)" % (tgt, n))
-
-def _v_bullets(t, k):
-    n = len(re.findall(r"(?m)^\s*[\*\-]\s+\S", t or "")); tgt = k.get("num_bullets") or 0
-    return (n == tgt, "exactly %d markdown bullet points (had %d)" % (tgt, n))
-
-def _v_placeholders(t, k):
-    n = len(re.findall(r"\[[^\]]*\]", t or "")); tgt = k.get("num_placeholders") or 0
-    return (n >= tgt, "at least %d [square-bracket placeholders] (had %d)" % (tgt, n))
-
-def _v_postscript(t, k):
-    mk = (k.get("postscript_marker") or "P.S.")
-    return (mk.lower().replace(" ", "") in (t or "").lower().replace(" ", ""),
-            "include a postscript starting with '%s'" % mk)
-
-def _v_end_checker(t, k):
-    ph = (k.get("end_phrase") or "").strip()
-    return ((t or "").strip().endswith(ph), "end with EXACTLY the phrase: '%s'" % ph)
-
-def _v_quotation(t, k):
-    s = (t or "").strip()
-    return (len(s) >= 2 and s.startswith('"') and s.endswith('"'), "wrap the WHOLE response in double quotes")
-
-def _v_constrained(t, k):
-    return ((t or "").strip() in ("My answer is yes.", "My answer is no.", "My answer is maybe."),
-            "answer with exactly one of: 'My answer is yes./no./maybe.'")
-
-def _v_two_responses(t, k):
-    parts = [p for p in (t or "").split("******") if p.strip()]
-    return (len(parts) == 2, "give TWO different responses separated by 6 asterisks ******")
-
-def _v_json(t, k):
-    s = (t or "").strip()
-    s = re.sub(r"^```(?:json)?\s*", "", s); s = re.sub(r"\s*```$", "", s)
-    try:
-        json.loads(s); return (True, "entire response must be valid JSON")
-    except Exception:
-        return (False, "entire response must be valid JSON")
-
-def _v_repeat_prompt(t, k):
-    rep = re.sub(r"\s+", " ", (k.get("prompt_to_repeat") or "").strip().lower())
-    got = re.sub(r"\s+", " ", (t or "").strip().lower())
-    return (rep and got.startswith(rep), "first REPEAT the request verbatim, then answer")
-
-def _v_multiple_sections(t, k):
-    sp = (k.get("section_spliter") or "SECTION"); tgt = k.get("num_sections") or 0
-    n = len(re.findall(re.escape(sp), t or "", flags=re.IGNORECASE))
-    return (n >= tgt, "at least %d sections each marked '%s'" % (tgt, sp))
-
-
-_REGISTRY = {
-    "punctuation:no_comma": _v_no_comma,
-    "length_constraints:number_words": _v_number_words,
-    "length_constraints:number_sentences": _v_number_sentences,
-    "length_constraints:number_paragraphs": _v_number_paragraphs,
-    "keywords:forbidden_words": _v_forbidden_words,
-    "keywords:existence": _v_existence,
-    "keywords:frequency": _v_frequency,
-    "keywords:letter_frequency": _v_letter_frequency,
-    "change_case:english_lowercase": _v_lowercase,
-    "change_case:english_capital": _v_capital,
-    "change_case:capital_word_frequency": _v_capital_word_freq,
-    "detectable_format:title": _v_title,
-    "detectable_format:number_highlighted_sections": _v_highlights,
-    "detectable_format:number_bullet_lists": _v_bullets,
-    "detectable_content:number_placeholders": _v_placeholders,
-    "detectable_content:postscript": _v_postscript,
-    "startend:end_checker": _v_end_checker,
-    "startend:quotation": _v_quotation,
-    "detectable_format:constrained_response": _v_constrained,
-    "combination:two_responses": _v_two_responses,
-    "detectable_format:json_format": _v_json,
-    "combination:repeat_prompt": _v_repeat_prompt,
-    "detectable_format:multiple_sections": _v_multiple_sections,
-}
-SUPPORTED = set(_REGISTRY)
+_INSTRUCTION_DICT = _registry.INSTRUCTION_DICT
+SUPPORTED = set(_INSTRUCTION_DICT)
 
 
 # ---------------- env interface ----------------
@@ -207,15 +44,29 @@ def build_prompt(task, mem):
 
 
 def _check_all(task, response):
-    """Return [(instruction_id, ok, description), ...] for every constraint on the task."""
+    """Return [(instruction_id, ok, description), ...] for every constraint on the task, using the
+    OFFICIAL IFEval verifiers and the official STRICT-check convention (build_description(**kwargs);
+    re-build with the prompt if the instruction's args include it; require a non-empty response)."""
     out = []
-    for iid, kw in zip(task.get("instruction_id_list", []), task.get("kwargs", [])):
-        fn = _REGISTRY.get(iid)
-        if fn is None:
-            continue
+    prompt = task.get("prompt", "")
+    ids = task.get("instruction_id_list", []) or []
+    kwargs_list = task.get("kwargs", []) or []
+    resp = response or ""
+    for index, iid in enumerate(ids):
+        cls = _INSTRUCTION_DICT.get(iid)
+        if cls is None:
+            continue                                     # unknown id (filtered at fetch; never scored)
+        kw = {}
+        if index < len(kwargs_list):
+            kw = {k: v for k, v in (kwargs_list[index] or {}).items() if v is not None}
         try:
-            ok, desc = fn(response or "", kw or {})
-        except Exception as exc:  # a verifier crash counts as not-satisfied, never crashes the run
+            inst = cls(iid)
+            desc = inst.build_description(**kw)
+            args = inst.get_instruction_args()
+            if args and "prompt" in args:                # prompt-dependent instructions (e.g. repeat_prompt)
+                desc = inst.build_description(prompt=prompt)
+            ok = bool(resp.strip() and inst.check_following(resp))
+        except Exception as exc:                         # a checker crash counts as not-satisfied
             ok, desc = False, "%s (checker error: %s)" % (iid, exc)
         out.append((iid, bool(ok), desc))
     return out
@@ -225,7 +76,7 @@ def score(task, response):
     results = _check_all(task, response)
     n = len(results)
     npass = sum(1 for _, ok, _ in results if ok)
-    em = 1.0 if (n > 0 and npass == n) else 0.0     # prompt-level STRICT accuracy
+    em = 1.0 if (n > 0 and npass == n) else 0.0          # prompt-level STRICT accuracy
     soft = (npass / n) if n else 0.0
     return {"em": em, "f1": soft, "sub_em": em,
             "predicted_answer": (response or "").strip()[:80],
@@ -273,8 +124,9 @@ def summarize(task, response, ev):
 
 
 def fetch(n, out, split="train", config="default"):
-    """Materialize an IFBench/IFEval task file, KEEPING only prompts whose every instruction is
-    implemented stdlib-only (so scoring is faithful on every retained task)."""
+    """Materialize an IFBench/IFEval task file. With the official registry ALL 25 instruction types
+    are supported, so the filter now keeps every standard IFEval prompt (it remains as a safety net
+    against any future unknown id, so scoring stays faithful on every retained task)."""
     out = pathlib.Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     kept, offset = [], 0

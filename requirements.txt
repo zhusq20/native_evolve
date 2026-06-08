@@ -1,3 +1,12 @@
-# native_evolve runtime deps. Python 3.9+ (stdlib-only core; openpyxl only for the
-# spreadsheetbench env). The LLM is the `claude` CLI — NOT a pip package.
-openpyxl>=3.1
+# native_evolve runtime deps. Python 3.9+ (stdlib-only core; the LLM is the `claude` CLI,
+# NOT a pip package). Most envs are stdlib-only; these extras are per-env:
+openpyxl>=3.1            # spreadsheetbench env (codegen exec + cell compare)
+numpy>=1.21             # arc env (ARC-AGI Stream grid generator)
+
+# ifbench env: the VENDORED OFFICIAL google-research IFEval verifiers (eval/envs/ifeval_lib/)
+# need these. After install, fetch the punkt tokenizer once:
+#   python3 -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
+nltk>=3.8
+langdetect>=1.0.9
+immutabledict>=2.0
+absl-py>=1.0
