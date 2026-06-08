@@ -18,6 +18,7 @@ import numpy as np
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from envs import arc, arc_gen  # noqa: E402
+from envs.arc_lib import scoring as arc_scoring  # noqa: E402
 
 passed = 0
 
@@ -99,6 +100,31 @@ identity = wrap("def solve(grid):\n    return [list(r) for r in grid]")
 ev_id = arc.score(task, identity)
 check("score: identity program -> em 0.0 (held-out tests are non-trivial)", ev_id["em"] == 0.0)
 check("score: identity program -> graded f1 in [0,1)", 0.0 <= ev_id["f1"] < 1.0)
+
+# --------------------------------------------------------------------- official arc_lib kernel
+# pair_correct = exact list-of-lists equality (dims + every cell); None never matches.
+check("arc_lib.pair_correct: exact match", arc_scoring.pair_correct([[1, 2]], [[1, 2]]) is True)
+check("arc_lib.pair_correct: cell mismatch", arc_scoring.pair_correct([[1, 2]], [[1, 3]]) is False)
+check("arc_lib.pair_correct: dim mismatch", arc_scoring.pair_correct([[1, 2]], [[1, 2, 3]]) is False)
+check("arc_lib.pair_correct: None -> False", arc_scoring.pair_correct(None, [[0]]) is False)
+# pass@k: a pair is solved iff ANY attempt matches.
+check("arc_lib.pair_solved: pass@2 second attempt right",
+      arc_scoring.pair_solved([[[9]], [[0]]], [[0]]) is True)
+# task_score: official fraction = solved_pairs / num_pairs; all_solved = strict binary.
+ts_half = arc_scoring.task_score([[[[0]]], [[[9]]]], [[[0]], [[0]]])
+check("arc_lib.task_score: 1/2 solved -> fraction 0.5", ts_half["fraction"] == 0.5
+      and ts_half["n_solved"] == 1 and ts_half["all_solved"] is False)
+ts_all = arc_scoring.task_score([[[[0]]], [[[0]]]], [[[0]], [[0]]])
+check("arc_lib.task_score: 2/2 solved -> fraction 1.0 + all_solved", ts_all["fraction"] == 1.0
+      and ts_all["all_solved"] is True)
+check("arc_lib.aggregate: mean*100", arc_scoring.aggregate([1.0, 0.5, 0.0]) == 50.0)
+
+# score() exposes the official fractional arc_task_score, consistent with em (strict all-pairs).
+check("score: correct program -> arc_task_score 1.0", arc.score(task, good)["arc_task_score"] == 1.0)
+check("score: identity program -> arc_task_score < 1.0 (held-out not all solved)",
+      ev_id["arc_task_score"] < 1.0)
+check("score: em==1.0 iff arc_task_score==1.0 (strict == all pairs solved)",
+      (arc.score(task, good)["em"] == 1.0) == (arc.score(task, good)["arc_task_score"] == 1.0))
 
 # --------------------------------------------------------------------- reffree (try_run) channel
 check("try_run: correct program PASSES the demos", arc.try_run(task, good)[0] is True)

@@ -211,6 +211,46 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-08  (session 17 — apply "reuse official scoring, don't reimplement" to ARC: align score() with the official ARC-AGI kernel; the GENERATOR stays custom for a documented reason)
+The user asked to align ARC's evaluation code with the "original" and reuse it rather than self-implement.
+Investigated, then split the env cleanly into a CUSTOM generator (justified) + OFFICIAL-faithful scoring (now vendored).
+
+**Finding 1 — the GENERATOR cannot be reused (custom is the only option).** paper5 ("ARC-AGI Stream", arXiv
+2605.12978) ships ONLY a PDF (`papers/paper5/2605.12978v1.pdf`) — no code, no generator. And real ARC-AGI
+(fchollet) data is NOT family/skill-labeled, which the entire gate experiment depends on (shared-procedure
+families + precise signal). So `arc_gen.py` MUST stay self-implemented — this is the one justified self-implemented
+artifact (already flagged in `reuse-not-reimplement-eval.md`). Documented the reason inline in arc_gen.py's docstring.
+
+**Finding 2 — the SCORING has an "original" and now matches it.** Pulled the official ARC-AGI scoring convention
+(fchollet/ARC-AGI README + arc-prize/model_baseline `ARCScorer.score_task`). The kernel is tiny and unambiguous:
+exact match = plain list-of-lists `pred == gold` (dims + every cell, NO cell-level partial credit); a test pair is
+solved iff ANY attempt matches (pass@k); the per-task score is the FRACTION of pairs solved (`task_score/num_pairs`);
+aggregate = mean×100. Audit of our old `arc.py:score()`:
+  * exact-match comparison (`pred == gold`) was ALREADY identical to official ✓ (no faithfulness bug — unlike the
+    pre-vendor ifbench regex stub or sb_lib's value quantization, ARC's comparison has no non-obvious rule to get wrong);
+  * we reported a STRICT all-or-nothing `em` + a homemade cell-`f1`, and did NOT expose the official FRACTIONAL
+    per-pair task score — the one real divergence.
+
+**Change (additive, recorded results stay comparable):** vendored the official scoring KERNEL into
+`eval/envs/arc_lib/scoring.py` (same discipline as `sb_lib/` / `ifeval_lib/`; provenance header + the pass@1
+program-synthesis caveat). `arc.py:score()` now delegates the per-pair exact-match + per-task scoring to it and
+exposes:
+  * `em` = strict all-pairs-solved (the README "correct for *all* test inputs" task-solved binary; VALUE UNCHANGED),
+  * `arc_task_score` = the OFFICIAL fractional score (`task_score/num_pairs`; with n_tests=2 → 0/0.5/1.0) — NEW,
+  * `f1` = mean cell accuracy, now explicitly LABELED a non-official diagnostic (VALUE UNCHANGED → prior arc_gbs
+    cell-F1 numbers remain comparable). I did NOT vendor the official `ARCScorer` class wholesale: its JSON-submission
+    file-I/O wrapper (ARCTask/BenchmarkedTaskResults dataclasses, submission-dir readers) is tied to a direct-grid
+    PREDICTION format that doesn't apply to our program-synthesis env — only the scoring logic is faithfulness-bearing.
+
+**Honest scope:** because ARC's scorer is trivial, this is mostly PROVENANCE + exposing the official fractional
+metric, not a bug fix (our exact-match was already right). The lasting value: the env is now cleanly split — scoring
+is official-faithful (vendored, with the fractional metric available), generator is custom-by-necessity (documented).
+ARC remains a CONTROLLED DIAGNOSTIC (no external-leaderboard comparability, since the tasks are generated), NOT a
+comparability headline. **Tests: `eval/test_arc_env.py` 38/38 (was 27; +11 for arc_lib kernel + arc_task_score),
+zero spend.** New: `eval/envs/arc_lib/{__init__,scoring}.py`. Touched: `arc.py` (import + score() + docstring),
+`arc_gen.py` (docstring). **NEXT (unchanged):** the ≥3-seed + P0-stats follow-up on the group_by_shape +0.50 memory
+win; optionally report `arc_task_score` alongside em in the arc summaries/plots.
+
 ### 2026-06-08  (session 16 cont. — METHODOLOGY: vendor the OFFICIAL IFEval verifiers; "reuse official scoring, don't reimplement")
 Prompted by the user's audit ("is the self-implemented eval code necessary?"), paid down a faithfulness debt.
 The old `ifbench.py` was a stdlib REGEX REIMPLEMENTATION of IFEval — its own docstring admitted "close, not

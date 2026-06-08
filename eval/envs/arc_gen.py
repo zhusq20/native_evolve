@@ -18,6 +18,10 @@ WHY we borrowed this (session-15 gate hunt): it is the one regime with BOTH
 
 Self-contained: pure Python 3.9 + numpy, NO ARC-GEN dependency, NO Docker, NO network.
 We re-derive the family/skill decomposition from the paper's Tables 5-6 + App. B.2 helpers.
+This GENERATOR is the only self-implemented part of the env and the only justified one:
+paper5 released no code, and real ARC-AGI is not family/skill-labeled (the gate experiment
+needs that structure). SCORING is NOT reimplemented -- arc.py delegates exact-match + the
+per-task score to `arc_lib.scoring` (the official ARC-AGI kernel). See arc.py's docstring.
 
 v1 scope: 7 skills x 3 families {color_property, largest, group_by_shape}. The paper's
 other three families {detect_inside_frame_relation, detect_key_marker_rule (conditional),

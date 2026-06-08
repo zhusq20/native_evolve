@@ -19,6 +19,19 @@ A program that overfits the demos but fails held-out is the realistic reffree<or
 on ARC program synthesis with several diverse demos the two nearly coincide -> the signal is
 genuinely precise (the whole point).
 
+SCORING is OFFICIAL-faithful, the GENERATOR is custom — keep the two straight (the
+"reuse official scoring, don't reimplement" discipline; see docs/findings_synthesis.md):
+  * score() delegates the exact-match comparison + per-task score to `arc_lib.scoring`, which
+    re-expresses the official ARC-AGI kernel (fchollet/ARC-AGI README + arc-prize/model_baseline):
+    grid equality is a plain list-of-lists `==` (dims + every cell, NO cell-level partial credit),
+    a test pair is solved iff any attempt matches (pass@k; k=1 here -- one synthesized program ->
+    one deterministic output per pair), and the per-task score is the FRACTION of pairs solved.
+    score() exposes `em` (strict: all pairs solved = the README task-solved binary), `arc_task_score`
+    (the official fractional score), and a NON-official cell-`f1` diagnostic (labeled as ours).
+  * the GENERATOR (arc_gen.py) is necessarily self-implemented: paper5 ("ARC-AGI Stream") released
+    NO code, and real ARC-AGI is not family/skill-labeled (our gate experiment needs that structure).
+    -> ARC is a CONTROLLED DIAGNOSTIC env, not an external-leaderboard comparability headline.
+
 Data: eval/data/arc_val.jsonl (tracked; rows carry family/skill/demos/tests). Re-generate:
   python3 eval/fetch.py --env arc --n 60        (see fetch.py / docs/PROGRESS.md "Data")
 """
@@ -27,6 +40,11 @@ import pathlib
 import re
 import subprocess
 import sys
+
+try:
+    from .arc_lib import scoring as arc_scoring
+except ImportError:  # direct (non-package) import
+    from arc_lib import scoring as arc_scoring
 
 NAME = "arc"
 
@@ -138,22 +156,37 @@ def _cell_acc(pred, gold):
 
 # --------------------------------------------------------------------------- scoring (ORACLE)
 def score(task, response):
-    """GOLD signal: run solve on the HELD-OUT test inputs and require exact match on all of them.
-    em = 1.0 iff every held-out test reproduces exactly; f1 = mean held-out cell accuracy."""
+    """GOLD signal: run solve on the HELD-OUT test inputs and score the official ARC-AGI way.
+
+    The exact-match comparison + the per-pair / per-task scoring are delegated to
+    ``arc_lib.scoring`` (faithful to fchollet's ARC-AGI README + arc-prize's reference scorer)
+    so our grid correctness matches the published convention, not an ad-hoc check:
+      * ``em``            = arc_lib ``all_solved`` — the README's strict "correct for *all*
+                            test inputs" task-solved binary (1.0 iff every held-out pair is
+                            an exact grid match). This is the headline metric our runs report.
+      * ``arc_task_score``= arc_lib ``fraction`` (task_score / num_pairs) — the OFFICIAL
+                            arc-prize per-task score (partial credit across the held-out pairs;
+                            with n_tests=2 it is 0 / 0.5 / 1.0). pass@1 by construction (one
+                            synthesized program -> one deterministic output per pair).
+      * ``f1``            = mean held-out CELL accuracy — a NON-official diagnostic (ARC gives
+                            NO cell-level partial credit). Kept for continuity/granularity, but
+                            it is OURS, not part of the ARC metric. Use ``arc_task_score`` when
+                            you want an ARC-faithful sub-EM.
+    """
     code = _extract_code(response)
     tests = task.get("tests", [])
     ins = [t[0] for t in tests]
     golds = [t[1] for t in tests]
     outs, err = _run_solve(code, ins) if (code and ins) else (None, "no code / no tests")
-    accs, exacts = [], []
-    if outs is not None:
-        for pred, gold in zip(outs, golds):
-            accs.append(_cell_acc(pred, gold))
-            exacts.append(pred == gold)
-    em = 1.0 if (exacts and all(exacts)) else 0.0
+    # one attempt per pair (pass@1); a crash/timeout -> no outputs -> None per pair (never matches)
+    preds = outs if outs is not None else [None] * len(golds)
+    ts = arc_scoring.task_score([[p] for p in preds], golds)          # official kernel
+    accs = [_cell_acc(p, g) for p, g in zip(preds, golds)] if outs is not None else []
+    em = 1.0 if ts["all_solved"] else 0.0
     f1 = round(sum(accs) / len(accs), 4) if accs else 0.0
-    npass = sum(1 for e in exacts if e)
-    return {"em": em, "f1": f1, "sub_em": em, "predicted_answer": "(python solve)",
+    npass = ts["n_solved"]
+    return {"em": em, "f1": f1, "sub_em": em, "arc_task_score": ts["fraction"],
+            "predicted_answer": "(python solve)",
             "gold_answers": ["%d held-out grids" % len(tests)],
             "_tests": "%d/%d" % (npass, len(tests)), "_exec_err": err,
             "_reason": "" if em else (err or "solve failed %d/%d held-out tests"
