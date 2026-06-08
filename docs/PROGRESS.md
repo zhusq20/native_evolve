@@ -40,7 +40,10 @@ acc-vs-cost is fair. Baselines, all on the same `claude` CLI + same target model
   ACTUALLY invoked (PostToolUse hook). `--memory_mode inject` (+ `--retrieval lexical|agentic`)
   reproduces the pre-session-19 force-injection behavior.** (Pre-19 default was `--retrieval agentic`.)
 - Deployment: Claude Code NATIVE (session 19) — SessionStart→`evolve materialize` (memory becomes a
-  discoverable skill catalog), Stop→reflect (recursion-guarded). Pre-19: UserPromptSubmit force-injected memory. ✓
+  discoverable skill catalog), Stop→reflect which now ALSO **credits the memory the agent invoked**
+  (transcript attribution, reference-free success) + **consolidates via induce+held-out gate**
+  (`promote.consolidate_deploy`, the SAME mechanism as the experiment — replaces legacy `promote.run`).
+  The live deploy learning loop is thus aligned with the eval loop. Pre-19: UserPromptSubmit force-injected memory. ✓
 - Eval harness: prequential runner, 4 baselines, `--workers` parallel across runs, SVG plots. ✓
 - Envs: searchqa ✓, spreadsheetbench ✓ (codegen+exec+official cell-compare), hotpotqa ✓
   (distractor multi-hop QA, official EM/F1, bridge/comparison families), gsm8k ✓ (deprecated: too easy).
@@ -286,6 +289,33 @@ billed step.
 --stratify_key family --memory_mode native --skill_tools Skill,Read,Bash`, arms {no_memory, ours_full,
 ours_full skill-OFF (`--induce_every 0`)}. With native retrieval the skill-OFF arm now answers "does the
 SKILL tier add anything OVER memory" under the SAME mechanism deployment uses — no injection confound.
+
+**Session 19 cont. — align the LIVE deploy LEARNING loop to the experiment (credit + promotion).** Audit
+(user asked "train 和 deploy 对齐了吗") found: the eval's frozen train→test is aligned (both go through one
+`native_solve`; the gate's full arm presents the candidate as discoverable exactly as inference would — no
+train/inference mismatch). But the REAL interactive deploy (`cd engine && claude`) had two gaps vs the
+experiment: (a) it never CREDITED invoked memory (no signal), (b) it promoted via the legacy
+`promote.run()` (per-bullet draft + replay-substring gate), not the experiment's induce+held-out-gate.
+Closed both:
+- **Credit** (`reflect.py`): the Stop-hook reflection now parses the transcript for invoked `Skill` names
+  (`_walk_content` extracts the tool_use input), maps `mem-<id>` → bullet ids, and `curate.credit(ids,
+  success=...)`. Success is REFERENCE-FREE (no tool error observed in the transcript) — the deploy-available
+  analogue of the experiment's reffree credit (a live session has no gold/env). Experiment path
+  (summary set, `promote_skills=False`) is untouched — it credits via its own native_solve invoked_ids.
+- **Promotion** (`promote.consolidate_deploy`): replaces `promote.run()` in the deploy reflect path.
+  Clusters memory via `induce.induce` (NOT one-skill-per-bullet), then GATES candidates against the replay
+  cases (the deploy held-out benchmark) with the experiment's SAME accept rule (`verify.rolling_decision`,
+  native with/without A/B via `_deploy_catalog_solve` = deploy-faithful catalog). NO replay benchmark → STAGE
+  candidates for review (honest; never auto-activate blind). Frequency-gated (`DEPLOY_INDUCE_EVERY`, default
+  8 reflections) so a live turn doesn't pay induce+gate. `config.ensure_skill_link` hardened to NO-OP on the
+  real-dir native catalog (was: migrate+clobber). `promote.run()` kept as legacy/reference.
+- **Validated offline** (`eval/test_deploy_learning.py` 8/8, zero spend): transcript→invoked-skill
+  extraction; credit uses+1 always / helpful+1 iff no error; consolidate stages candidates when no replay;
+  ensure_skill_link doesn't clobber. Full sweep green (materialize 17/17, gate_audit 16/16, arc 38).
+  NOT yet billed-run end-to-end (the induce+gate claude path mirrors the already-validated experiment
+  functions + the smoke_native mechanism). **Fundamental, honest residual:** deploy's signal is
+  reference-free (no gold/env) and its held-out set is the replay cases (sparse → usually underpowered →
+  stages) — the MECHANISM matches the experiment; the SIGNAL/evidence is the deploy-available analogue.
 
 ### 2026-06-08  (session 18 — STRATEGIC PIVOT: refocus on the memory↔skill BOUNDARY (C1) under the OFFLINE frozen+gold protocol; verification line DEMOTED to supporting; zero spend this session)
 The user flagged that sessions 14–17 had drifted from the original memory/skill thesis INTO verification

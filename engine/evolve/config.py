@@ -39,10 +39,12 @@ PROMPTS_DIR = HOME / "prompts"
 
 
 def ensure_skill_link():
-    """Make .claude/skills a symlink to the visible ./skills dir.
+    """Legacy: make .claude/skills a symlink to the visible ./skills dir (idempotent).
 
-    Idempotent. Lets the harness auto-discover skills via its native path while
-    the source of truth stays a plain, visible, git-trackable ./skills folder.
+    NOTE (session 19): the NATIVE deploy catalog makes .claude/skills a REAL dir (authored skills +
+    materialized memory; see materialize.assemble_deploy_catalog). So if .claude/skills already exists
+    as a real dir, this is a NO-OP — it must NOT migrate/clobber the assembled catalog. Only used now
+    by the legacy inject-mode path + a fresh-clone fallback (when nothing exists yet).
     """
     SKILLS_DIR.mkdir(parents=True, exist_ok=True)
     link = CLAUDE_SKILLS_LINK
@@ -50,13 +52,7 @@ def ensure_skill_link():
     if link.is_symlink():
         return  # already linked (don't second-guess the target)
     if link.exists():
-        # A real (non-symlink) dir is in the way: migrate its contents, then replace.
-        import shutil
-        for child in link.iterdir():
-            dest = SKILLS_DIR / child.name
-            if not dest.exists():
-                shutil.move(str(child), str(dest))
-        shutil.rmtree(link, ignore_errors=True)
+        return  # a real dir is present (the native catalog) — leave it; do NOT clobber
     try:
         link.symlink_to(pathlib.Path("..") / "skills", target_is_directory=True)
     except OSError:
