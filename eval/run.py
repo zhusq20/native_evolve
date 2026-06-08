@@ -24,7 +24,9 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
             repair_turns=0, repair_methods="ours", verify_mode="self_both",
             agentic=False, agentic_max_turns=20, native_skills="", batch_size=1,
             retrieval="agentic", gate_signal="oracle", credit_signal="oracle",
-            reflect_signal="oracle", gate_audit=False):
+            reflect_signal="oracle", gate_audit=False,
+            memory_mode="native", skill_turns=4, skill_tools="Skill,Read",
+            permission_mode="bypassPermissions"):
     home = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "home"
     home.mkdir(parents=True, exist_ok=True)
     out = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "tasks.jsonl"
@@ -44,6 +46,8 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
         "--batch_size", str(batch_size), "--retrieval", retrieval,
         "--gate_signal", gate_signal, "--credit_signal", credit_signal,
         "--reflect_signal", reflect_signal,
+        "--memory_mode", memory_mode, "--skill_turns", str(skill_turns),
+        "--skill_tools", skill_tools, "--permission_mode", permission_mode,
         "--home", str(home), "--out", str(out),
     ]
     if agentic:
@@ -140,6 +144,17 @@ def main():
     ap.add_argument("--gate_audit", action="store_true",
                     help="precision-law-for-gating audit: log BOTH gate signals (oracle vs reffree) on "
                          "the SAME val A/B answers to home/gate_audit.json (live decision = --gate_signal).")
+    ap.add_argument("--memory_mode", choices=["inject", "native"], default="native",
+                    help="HOW memory+skills reach the agent. native (DEFAULT, deploy-faithful): discoverable "
+                         ".claude/skills, agent invokes, credit = what it invoked. inject: legacy force-injected "
+                         "text block (+ --retrieval). See prequential --memory_mode.")
+    ap.add_argument("--skill_turns", type=int, default=4,
+                    help="native: claude --max-turns for the Skill-enabled solve (default 4).")
+    ap.add_argument("--skill_tools", default="Skill,Read",
+                    help="native: allowed tools (claude --allowedTools). Default 'Skill,Read'; for code "
+                         "self-test envs (ARC) use 'Skill,Read,Write,Edit,Bash'. Same for all arms.")
+    ap.add_argument("--permission_mode", default="bypassPermissions",
+                    help="native/agentic: claude --permission-mode (default 'bypassPermissions' for headless).")
     args = ap.parse_args()
 
     methods = [m.strip() for m in args.methods.split(",") if m.strip()]
@@ -160,7 +175,8 @@ def main():
                        args.repair_turns, args.repair_methods, args.verify_mode,
                        args.agentic, args.agentic_max_turns, args.native_skills, args.batch_size,
                        args.retrieval, args.gate_signal, args.credit_signal, args.reflect_signal,
-                       args.gate_audit)
+                       args.gate_audit, args.memory_mode, args.skill_turns, args.skill_tools,
+                       args.permission_mode)
     if args.workers <= 1:
         for m, s in jobs:
             results[m][s] = _call(m, s)

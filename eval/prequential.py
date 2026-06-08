@@ -299,8 +299,13 @@ def main():
                     help="native: claude --max-turns for the Skill-enabled solve (enough to invoke a skill "
                          "then answer). Small (default 4) -> ~1.5-3x single-shot cost, NOT the heavyweight agentic loop.")
     ap.add_argument("--skill_tools", default="Skill,Read",
-                    help="native: allowed tools for the solve. Default 'Skill,Read'. For code envs that "
-                         "self-test (e.g. ARC running its solve() on the shown demos) add 'Bash' (and 'Write').")
+                    help="native: allowed tools for the solve (claude --allowedTools). Default 'Skill,Read'. "
+                         "For code envs that self-test (e.g. ARC running its solve() on the shown demos) use "
+                         "'Skill,Read,Write,Edit,Bash'. Applied to ALL arms, so it doesn't confound the comparison.")
+    ap.add_argument("--permission_mode", default="bypassPermissions",
+                    help="native/agentic: claude --permission-mode. Default 'bypassPermissions' (headless "
+                         "needs it so Skill/Bash/Write run without a prompt). Use 'acceptEdits'/'default' "
+                         "only if you want interactive-style gating (will stall headless tool use).")
     ap.add_argument("--home", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -606,7 +611,7 @@ def main():
             try:
                 r = llm.call_claude(
                     prompt, allowed_tools=args.skill_tools, cwd=sandbox, add_dir=sandbox,
-                    setting_sources="project", permission_mode="bypassPermissions",
+                    setting_sources="project", permission_mode=args.permission_mode,
                     max_turns=args.skill_turns, max_retries=1, timeout=900, return_cost=True)
                 resp, c = r if isinstance(r, tuple) else (r, 0.0)
                 cost += c
@@ -1057,11 +1062,14 @@ def main():
         acq_rows = []
         if args.method in LEARN_METHODS:
             acq_rows = learn_stream(train_tasks, "acquire")
-            if args.method == "ours_full":
+            if args.method == "ours_full" and args.induce_every > 0:
                 try:
                     consolidate(len(train_tasks) - 1)   # capture late-acquired memory before freezing
                 except Exception as exc:
                     sys.stderr.write("final consolidate error: %s\n" % exc)
+            # NOTE: --induce_every 0 is the true SKILL-OFF arm — NO skill induction at all (neither the
+            # during-acquire consolidate at line ~876 nor this final one) -> ours_full degrades to
+            # episodic+distilled memory, isolating the skill tier's marginal value for the C1 boundary.
         sys.stderr.write("[%s seed%d] FROZEN after %d acquire tasks; deploying on %d held-out test "
                          "(deploy_workers=%d)...\n"
                          % (args.method, args.seed, len(acq_rows), len(tasks), args.deploy_workers))
