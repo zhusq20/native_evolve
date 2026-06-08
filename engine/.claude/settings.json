@@ -1,11 +1,11 @@
 {
   "hooks": {
-    "UserPromptSubmit": [
+    "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/adapters/claude_code/hook_user_prompt_submit.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/evolve\" materialize"
           }
         ]
       }

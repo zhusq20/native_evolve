@@ -34,9 +34,13 @@ acc-vs-cost is fair. Baselines, all on the same `claude` CLI + same target model
 
 ## Status (what works, validated)
 - Engine: store / retrieve / curate(deterministic) / reflect(claude) / promote+gate(claude). ✓
-  **Retrieval default = `agentic` (native agentic-index: model selects from a plain-text index)** as of
-  session 13; the lexical bag-of-words top-k is still available via `--retrieval lexical`.
-- Deployment: Claude Code hooks (UserPromptSubmit→inject memory, Stop→reflect, recursion-guarded). ✓
+  **Retrieval default = `--memory_mode native` (session 19): every distilled bullet, episode, and
+  promoted skill is materialized as a DISCOVERABLE Claude Code skill (`.claude/skills`) and the agent
+  NATIVELY selects/invokes what it needs (a few-turn Skill-enabled solve); credit goes to what it
+  ACTUALLY invoked (PostToolUse hook). `--memory_mode inject` (+ `--retrieval lexical|agentic`)
+  reproduces the pre-session-19 force-injection behavior.** (Pre-19 default was `--retrieval agentic`.)
+- Deployment: Claude Code NATIVE (session 19) — SessionStart→`evolve materialize` (memory becomes a
+  discoverable skill catalog), Stop→reflect (recursion-guarded). Pre-19: UserPromptSubmit force-injected memory. ✓
 - Eval harness: prequential runner, 4 baselines, `--workers` parallel across runs, SVG plots. ✓
 - Envs: searchqa ✓, spreadsheetbench ✓ (codegen+exec+official cell-compare), hotpotqa ✓
   (distractor multi-hop QA, official EM/F1, bridge/comparison families), gsm8k ✓ (deprecated: too easy).
@@ -219,6 +223,70 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-08  (session 19 — make eval台 == real deploy: BOTH memory AND skill retrieval go through Claude Code's NATIVE mechanism (discoverable .claude/skills, agent selects/invokes); mechanism go/no-go PASS for ~$0.01)
+The user asked to align the eval harness with REAL deployment: memory and skill should BOTH be selected
+via Claude Code's native skill mechanism (description-gated catalog, agent invokes, body lazy-loaded),
+and the deploy UserPromptSubmit force-injection should ALSO become native. This removes a real
+confound: pre-19, eval force-INJECTED the top-k skills as text every task (no agent choice, pure
+clutter), so "does the skill tier add anything over memory?" was measured under a clumsy injection
+method, not deploy-faithful conditions.
+
+**Key reframe (the user's correction, and it was right): native skill discovery does NOT need the
+heavyweight per-env `agentic_attempt`.** `claude -p` is already an internal agent loop; SB's
+`agentic_attempt` is heavy only because SB's ANSWER is a file (write/run/repair). For native skill
+discovery we just lift the artificial 1-turn/`Read`-only restriction on the normal text-answer solve:
+install skills in the solve's cwd `.claude/skills`, allow the `Skill` tool, give a few turns,
+`--setting-sources project`. Env-agnostic, works on ARC directly, **~1.5–3× single-shot cost (NOT 10–20×)**.
+
+**Built (all 3.9-safe; design decisions locked with the user):**
+- `engine/evolve/materialize.py` (NEW, pure Python — no LLM, determinism rule intact): renders the store
+  as a discoverable catalog. **Per-bullet mini-skill** (user's choice): each active distilled bullet →
+  `mem-<id>/SKILL.md`, `description` = the bullet's existing `scope` field (deterministic, no new LLM
+  call), body = content; each past-success episode → `ex-<slug>/SKILL.md`; active promoted skills linked
+  in. Caps the catalog by net-helpful (coarse bound, like `select_agentic`'s max_index; agent does the
+  fine per-task selection). `invoked_to_bullet_ids` / `match_invoked` reverse-map what the agent invoked
+  → bullet ids for credit. `assemble_deploy_catalog` / `link_all_skills` for the deploy side.
+- `engine/adapters/claude_code/hook_post_tool_use.py` (NEW): a PostToolUse hook that logs every `Skill`
+  invocation to a file → the deterministic bridge that replaces "harness injected id X" with "agent
+  INVOKED skill X" (deploy-faithful: credit what was USED, not what was offered).
+- `eval/prequential.py`: `--memory_mode native|inject` (DEFAULT native) + `--skill_turns` (4) +
+  `--skill_tools` ("Skill,Read"; ARC adds Bash). `native_solve()` builds a per-task sandbox (catalog +
+  PostToolUse hook + settings.json), runs the Skill-enabled few-turn solve, reads invocations, credits
+  the invoked bullets. ALL solve paths route through it in native mode (uniform across arms; no_memory =
+  empty catalog; ace/external still inject their playbook/frozen-skill TEXT = the clean single-tier-dump
+  contrast). Credit at all 3 sites (process / serve_and_learn / batched_learn) routed via `_credit_ids`.
+- **Gate goes native** (`consolidate_native`): base arm = native_solve with the base catalog, full arm =
+  + the candidate skills as DISCOVERABLE (presence, not injected text). Judge = **reffree self_verify
+  paired check** (user's lightweight choice), reusing `verify.gate_tally` / `signal_agreement` and a new
+  factored-out `verify.rolling_decision` (shared accept rule + rolling state; `rolling_gate` refactored
+  onto it, behavior identical — gate_audit test 16/16). Honest precision-law caveat: trust the reffree
+  gate only where the signal is precise (ARC exec/demo qualifies).
+- **Deploy native** (`engine/scripts/evolve` + `engine/.claude/settings.json` + `install-claude`):
+  `evolve setup`/`materialize` assemble `.claude/skills` as a REAL dir (authored-skill symlinks +
+  materialized mem-*/ex-*); SessionStart hook runs `evolve materialize` to keep the catalog fresh from
+  the store; UserPromptSubmit memory-injection REMOVED (memory is now discoverable skills). `.gitignore`
+  already covered `engine/.claude/skills`.
+
+**Validation:**
+- **GO/NO-GO smoke (`eval/smoke_native.py`, 1 real claude call, ~$0.014, haiku): PASS.** Headless
+  `claude -p --setting-sources project` DISCOVERED a `mem-*` skill from the sandbox catalog, INVOKED it
+  (the answer carried a secret knowable only from the skill body), the PostToolUse hook FIRED, and
+  attribution mapped it back to bullet `m-0001`. (Skill tool_input key is `"skill"`; the substring-based
+  `match_invoked` is schema-robust.) This is the de-risking that native discovery works in headless mode.
+- End-to-end native prequential ran clean (searchqa, ours_full, frozen 2-train/1-test, gate off): EM=1.0,
+  episodes recorded, no crash through inject→native_solve→credit→reflect→deploy.
+- Offline: `eval/test_materialize.py` 17/17 (NEW; materialize render/cap/regen/attribution + hook + deploy
+  link), `eval/test_gate_audit.py` 16/16 (verify refactor), `eval/test_arc_env.py` 38 (target env intact).
+
+**NOT yet done (honest):** `consolidate_native` is wired + its pieces individually validated, but not yet
+run end-to-end with REAL induction (a billed native-gate run). The Tier-1 boundary experiment is the next
+billed step.
+
+**NEXT — the Tier-1 native boundary run on ARC (now deploy-faithful):** `--protocol frozen --env arc
+--stratify_key family --memory_mode native --skill_tools Skill,Read,Bash`, arms {no_memory, ours_full,
+ours_full skill-OFF (`--induce_every 0`)}. With native retrieval the skill-OFF arm now answers "does the
+SKILL tier add anything OVER memory" under the SAME mechanism deployment uses — no injection confound.
+
 ### 2026-06-08  (session 18 — STRATEGIC PIVOT: refocus on the memory↔skill BOUNDARY (C1) under the OFFLINE frozen+gold protocol; verification line DEMOTED to supporting; zero spend this session)
 The user flagged that sessions 14–17 had drifted from the original memory/skill thesis INTO verification
 (the reference-free SIGNAL refactor → precision-law → gate audits → session-18's "native agent verifier for

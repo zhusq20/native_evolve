@@ -185,29 +185,18 @@ def lift_over_base(skill_block, base_block_fn, tasks, env, allowed_tools="Read",
     return sum(r["base_em"] for r in rows), sum(r["full_em"] for r in rows), len(rows)
 
 
-def rolling_gate(skill_block, base_block_fn, tasks, env, state_path, allowed_tools="Read",
-                 workers=1, min_n=18, margin=2, judge=None, solve_fn=None):
-    """Online consolidation gate: ACCUMULATE paired A/B evidence ACROSS consolidation checkpoints
-    (persisted in `state_path`) and activate skills only on a sufficiently-powered, dilution-guarded
-    lift over the episodic+distilled base. Fixes the one-shot tiny/saturated-val gate's two failure
-    modes: (1) false-POSITIVE — a marginal/noise 'lift' no longer flips activation (require a real
-    cumulative margin AND that skills RESCUE more base-failures than they BREAK); (2) it reports the
-    base-failure rescue / saturation signal so a no-headroom val reads as INCONCLUSIVE (keep skills
-    as candidates, graceful degrade) instead of a silent false-REJECT.
-
-    `judge` selects the correctness signal (default GOLD env.score; pass a reference-free judge —
-    self_verify ok — for the deploy-faithful gate, per prequential `--gate_signal`). `solve_fn`
-    selects the solve path (default bare single-shot; pass the harness's real solve() so skills are
-    judged under the SAME repair/agentic conditions inference uses — no train/inference mismatch).
-
+def rolling_decision(rows, state_path, min_n=18, margin=2, key_base="base_em", key_full="full_em"):
+    """ACCUMULATE paired A/B rows ACROSS consolidation checkpoints (persisted in `state_path`) and
+    decide activation: powered ∧ cumulative-margin ∧ not-diluting (broke<=rescued). Shared by the
+    text-injection gate (rolling_gate) and the native presence-based gate (consolidate_native), so
+    both use the IDENTICAL accept rule + rolling state. Rows carry integer key_base/key_full (1=pass).
     Returns (base_cum, full_cum, n_cum, activate, info)."""
-    rows = paired_ab(skill_block, base_block_fn, tasks, env, allowed_tools, workers, judge, solve_fn)
-    bp = sum(r["base_em"] for r in rows)
-    fp = sum(r["full_em"] for r in rows)
+    bp = sum(r[key_base] for r in rows)
+    fp = sum(r[key_full] for r in rows)
     n = len(rows)
-    base_fail = [r for r in rows if r["base_em"] == 0]
-    rescued = sum(1 for r in base_fail if r["full_em"] == 1)      # skill turned a base-FAIL into a pass
-    broke = sum(1 for r in rows if r["base_em"] == 1 and r["full_em"] == 0)  # skill broke a base-pass
+    base_fail = [r for r in rows if r[key_base] == 0]
+    rescued = sum(1 for r in base_fail if r[key_full] == 1)       # skill turned a base-FAIL into a pass
+    broke = sum(1 for r in rows if r[key_base] == 1 and r[key_full] == 0)  # skill broke a base-pass
 
     state = {"base": 0, "full": 0, "n": 0, "rescued": 0, "base_fail": 0, "broke": 0, "rounds": 0}
     try:
@@ -237,3 +226,19 @@ def rolling_gate(skill_block, base_block_fn, tasks, env, state_path, allowed_too
     info["decision"] = {"powered": powered, "beats_margin": beats, "not_diluting": not_diluting,
                         "saturated": state["base_fail"] == 0}
     return state["base"], state["full"], state["n"], activate, info
+
+
+def rolling_gate(skill_block, base_block_fn, tasks, env, state_path, allowed_tools="Read",
+                 workers=1, min_n=18, margin=2, judge=None, solve_fn=None):
+    """Online consolidation gate (text-injection path): paired with/without-skill A/B on held-out
+    tasks -> rolling_decision. Activates skills only on a sufficiently-powered, dilution-guarded lift
+    over the episodic+distilled base; otherwise keeps them as candidates (graceful degrade).
+
+    `judge` selects the correctness signal (default GOLD env.score; pass a reference-free judge —
+    self_verify ok — for the deploy-faithful gate, per prequential `--gate_signal`). `solve_fn`
+    selects the solve path (default bare single-shot; pass the harness's real solve() so skills are
+    judged under the SAME repair/agentic conditions inference uses — no train/inference mismatch).
+
+    Returns (base_cum, full_cum, n_cum, activate, info)."""
+    rows = paired_ab(skill_block, base_block_fn, tasks, env, allowed_tools, workers, judge, solve_fn)
+    return rolling_decision(rows, state_path, min_n, margin)

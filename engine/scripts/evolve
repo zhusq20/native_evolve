@@ -3,7 +3,9 @@
 
 Subcommands:
   status                       show memory + skill stats
-  retrieve "<text>"            preview what memory would be injected for a prompt
+  setup                        create dirs + assemble the native discoverable catalog (.claude/skills)
+  materialize                  regenerate .claude/skills from the current store (SessionStart refresh)
+  retrieve "<text>"            preview what memory would be injected for a prompt (legacy inject mode)
   reflect --transcript PATH    run reflection on a finished session (manual trigger)
   seed                         create dirs + a couple of example bullets
   doctor                       check the environment (python / claude / paths)
@@ -55,14 +57,29 @@ def cmd_reflect(args):
 
 
 def cmd_setup(_):
-    """Create dirs + link .claude/skills -> ./skills so promoted skills stay visible."""
+    """Create dirs + assemble the NATIVE discoverable catalog (.claude/skills = authored skills +
+    materialized memory). The agent natively selects from it; memory is no longer force-injected."""
+    from evolve import materialize
     for d in (config.MEMORY_DIR, config.REPLAY_DIR, config.SKILLS_DIR, config.CANDIDATE_DIR):
         d.mkdir(parents=True, exist_ok=True)
-    config.ensure_skill_link()
-    tgt = os.readlink(config.CLAUDE_SKILLS_LINK) if config.CLAUDE_SKILLS_LINK.is_symlink() else "(real dir)"
-    print("setup complete")
-    print("  visible skills dir :", config.SKILLS_DIR)
-    print("  harness link       :", config.CLAUDE_SKILLS_LINK, "->", tgt)
+    man = materialize.assemble_deploy_catalog()
+    mem = sum(1 for m in man if m["kind"] in ("mem", "ex"))
+    sk = sum(1 for m in man if m["kind"] == "skill")
+    print("setup complete (native catalog)")
+    print("  authored skills dir :", config.SKILLS_DIR)
+    print("  discovered catalog  :", config.CLAUDE_SKILLS_LINK,
+          "(real dir: %d authored skills + %d memory skills)" % (sk, mem))
+
+
+def cmd_materialize(_):
+    """(Re)generate the discoverable catalog from the CURRENT store — the SessionStart refresh so the
+    deployed agent sees the latest distilled memory + episodes + promoted skills as invokable skills."""
+    from evolve import materialize
+    man = materialize.assemble_deploy_catalog()
+    mem = sum(1 for m in man if m["kind"] in ("mem", "ex"))
+    sk = sum(1 for m in man if m["kind"] == "skill")
+    print("materialized catalog @ %s: %d memory skills + %d authored skills"
+          % (config.CLAUDE_SKILLS_LINK, mem, sk))
 
 
 def cmd_seed(_):
@@ -107,14 +124,17 @@ def cmd_install_claude(args):
         HOME, dest,
         ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".claude"),
     )
-    # write hooks into the target project's settings, pointing at the copied code,
-    # with NATIVE_EVOLVE_HOME=.native_evolve so memory + prompts resolve there.
+    # write NATIVE hooks into the target project's settings, pointing at the copied code, with
+    # NATIVE_EVOLVE_HOME=.native_evolve so memory + prompts resolve there. Native deploy: memory is a
+    # DISCOVERABLE catalog (SessionStart refreshes .claude/skills from the store) — NOT force-injected.
     base = "NATIVE_EVOLVE_HOME=\"$CLAUDE_PROJECT_DIR/.native_evolve\" python3 " \
            "\"$CLAUDE_PROJECT_DIR/.native_evolve/adapters/claude_code/%s\""
+    evolve_cli = "NATIVE_EVOLVE_HOME=\"$CLAUDE_PROJECT_DIR/.native_evolve\" python3 " \
+                 "\"$CLAUDE_PROJECT_DIR/.native_evolve/scripts/evolve\" materialize"
     hooks = {
         "hooks": {
-            "UserPromptSubmit": [
-                {"hooks": [{"type": "command", "command": base % "hook_user_prompt_submit.py"}]}
+            "SessionStart": [
+                {"hooks": [{"type": "command", "command": evolve_cli}]}
             ],
             "Stop": [
                 {"hooks": [{"type": "command", "command": base % "hook_stop.py"}]}
@@ -142,6 +162,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status").set_defaults(fn=cmd_status)
     sub.add_parser("setup").set_defaults(fn=cmd_setup)
+    sub.add_parser("materialize").set_defaults(fn=cmd_materialize)
     p = sub.add_parser("retrieve"); p.add_argument("text"); p.set_defaults(fn=cmd_retrieve)
     p = sub.add_parser("reflect"); p.add_argument("--transcript", required=True); p.set_defaults(fn=cmd_reflect)
     sub.add_parser("seed").set_defaults(fn=cmd_seed)

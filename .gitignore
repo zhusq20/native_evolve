@@ -21,7 +21,8 @@ results/*_smoke_*/
 # stray top-level ledgers (the per-run ledger of record lives under runs/*/home/)
 results/*_ledger.jsonl
 
-# Promoted skills are a real engine/skills dir; .claude/skills is a generated symlink.
+# Authored/promoted skills are a real engine/skills dir (tracked). .claude/skills is the GENERATED
+# native catalog (real dir: symlinks to authored skills + materialized mem-*/ex- memory skills).
 engine/.claude/skills
 
 # Per-deployment evolving state (uncomment to keep memory local-only)

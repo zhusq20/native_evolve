@@ -23,6 +23,7 @@ import pathlib
 import random
 import shutil
 import sys
+import tempfile
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 ENGINE_DIR = REPO_ROOT / "engine"   # the object under study (evolve/ prompts/ memory/ ...)
@@ -286,6 +287,20 @@ def main():
                          "and let the MODEL select the relevant [id]s (one extra claude call/task, billed "
                          "to the ledger). lexical: deterministic bag-of-words top-k overlap score (the "
                          "pre-2026-06-06 behavior; pass explicitly to reproduce the old runs).")
+    ap.add_argument("--memory_mode", choices=["inject", "native"], default="native",
+                    help="HOW memory + skills reach the solving agent. native (DEFAULT, deploy-faithful): "
+                         "every distilled bullet, episode, and promoted skill is written as a DISCOVERABLE "
+                         "Claude Code skill (.claude/skills) and the agent NATIVELY selects/invokes what it "
+                         "needs (a few-turn Skill-enabled solve); credit goes to what it ACTUALLY invoked. "
+                         "inject: the pre-2026-06-08 behavior — the harness force-injects a top-k memory/skill "
+                         "TEXT block into a single-shot prompt (pass explicitly to reproduce old runs; "
+                         "--retrieval then applies). ace/external still inject their playbook/frozen-skill text.")
+    ap.add_argument("--skill_turns", type=int, default=4,
+                    help="native: claude --max-turns for the Skill-enabled solve (enough to invoke a skill "
+                         "then answer). Small (default 4) -> ~1.5-3x single-shot cost, NOT the heavyweight agentic loop.")
+    ap.add_argument("--skill_tools", default="Skill,Read",
+                    help="native: allowed tools for the solve. Default 'Skill,Read'. For code envs that "
+                         "self-test (e.g. ARC running its solve() on the shown demos) add 'Bash' (and 'Write').")
     ap.add_argument("--home", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -300,7 +315,7 @@ def main():
     prepare_home(args.home)
     sys.path.insert(0, str(ENGINE_DIR))
 
-    from evolve import retrieve, reflect, store, curate, episodic, induce, verify  # noqa: E402
+    from evolve import retrieve, reflect, store, curate, episodic, induce, verify, materialize  # noqa: E402
     sys.path.insert(0, str(pathlib.Path(__file__).parent))
     import external_opt  # noqa: E402
     import envs as envs_pkg  # noqa: E402
@@ -375,6 +390,71 @@ def main():
         dis, _ = retrieve_distilled(t["question"])
         return "\n\n".join(x for x in (epi, dis) if x)
 
+    def consolidate_native(idx, cands):
+        """NATIVE gate: judge a candidate by PRESENCE in the discoverable catalog, not by injected
+        text. base arm = native_solve with the current catalog (episodic+distilled+active skills);
+        full arm = same catalog + the candidate skills as discoverable. The agent decides whether to
+        invoke the candidate — so the gate also tests 'is the candidate's description good enough to be
+        picked', exactly as deployment would. Reuses gate_tally / signal_agreement / rolling_decision
+        (identical accept rule + rolling state as the text-injection gate)."""
+        cand_pairs = [(c["name"], c["md"]) for c in cands]
+        audit = getattr(args, "gate_audit", False)
+        if audit:
+            judges = {"oracle": make_judge("oracle", env, self_verify_mod.self_verify),
+                      "reffree": make_judge("reffree", env, self_verify_mod.self_verify)}
+        else:
+            judges = {"live": make_judge(args.gate_signal, env, self_verify_mod.self_verify)}
+
+        def _pair(t):
+            # solve base & full ONCE each, score with every judge on the IDENTICAL answers
+            rb = native_solve(t, "", extra_skills=None, want_cost=True)[0]
+            rf = native_solve(t, "", extra_skills=cand_pairs, want_cost=True)[0]
+            row = {}
+            for nm, j in judges.items():
+                try: row[nm + "_base"] = int(bool(j(t, rb)))
+                except Exception: row[nm + "_base"] = 0
+                try: row[nm + "_full"] = int(bool(j(t, rf)))
+                except Exception: row[nm + "_full"] = 0
+            return row
+        rows = llm.pmap(_pair, verify_tasks, args.deploy_workers)
+
+        if audit:
+            t_or = verify.gate_tally(rows, "oracle", min_n=args.gate_min_n, margin=args.gate_margin)
+            t_rf = verify.gate_tally(rows, "reffree", min_n=args.gate_min_n, margin=args.gate_margin)
+            sig = verify.signal_agreement(rows, "oracle", "reffree")
+            agree = (t_or["activate"] == t_rf["activate"])
+            audit_obj = {"idx": idx, "candidates": [c["name"] for c in cands], "mode": "native",
+                         "oracle": t_or, "reffree": t_rf, "agree": agree,
+                         "signal_agreement": sig, "live_signal": args.gate_signal}
+            try:
+                (home / "memory" / "gate_audit.json").write_text(json.dumps(audit_obj, indent=2),
+                                                                 encoding="utf-8")
+            except Exception as exc:
+                sys.stderr.write("gate_audit write error: %s\n" % exc)
+            activate = (t_rf if args.gate_signal == "reffree" else t_or)["activate"]
+            for c in cands:
+                induce.write_skill(c, status=("active" if activate else "candidate"))
+            sys.stderr.write(
+                "[gate_audit native @%d] %d cand(s) | ORACLE rescued=%d broke=%d act=%s | "
+                "REFFREE rescued=%d broke=%d act=%s | AGREE=%s | base_fail_agree=%.2f (gold_fail=%d) | live=%s\n"
+                % (idx, len(cands), t_or["rescued"], t_or["broke"], t_or["activate"],
+                   t_rf["rescued"], t_rf["broke"], t_rf["activate"], agree,
+                   sig["base_fail_agree"], sig["n_base_fail"], args.gate_signal))
+            return
+
+        prod_rows = [{"base_em": r["live_base"], "full_em": r["live_full"]} for r in rows]
+        bp, fp, vn, activate, info = verify.rolling_decision(
+            prod_rows, str(home / "memory" / "gate_window.json"),
+            min_n=args.gate_min_n, margin=args.gate_margin)
+        for c in cands:
+            induce.write_skill(c, status=("active" if activate else "candidate"))
+        sys.stderr.write("[consolidate native @%d] rolling gate (%s): cum base %d -> +skills %d (n=%d, "
+                         "rescued=%d broke=%d sat=%s) => %s\n"
+                         % (idx, args.gate_signal, bp, fp, vn, info["rescued"], info["broke"],
+                            info["decision"]["saturated"],
+                            ("ACTIVATE %d skills" % len(cands)) if activate
+                            else "REJECT/candidate (degrade)"))
+
     def consolidate(idx):
         """Non-destructive, GATED consolidation: induce skills from memory, activate them ONLY
         if they lift held-out accuracy over the episodic+distilled baseline; else keep them as
@@ -382,6 +462,8 @@ def main():
         cands = induce.induce(focus_failures=True)
         if not cands:
             return
+        if args.memory_mode == "native":
+            return consolidate_native(idx, cands)
         # NO train/inference MISMATCH (skill presentation): show CANDIDATE skills to the gate EXACTLY
         # as inference shows ACTIVE skills — same render_skills_block (top-k by relevance, compacted,
         # same header), appended AFTER the episodic+distilled base (skill LAST), per inject() order.
@@ -484,12 +566,89 @@ def main():
             return self_verify_mod.self_verify(task, resp, env, use_critique=True)  # on a clean run)
         return envs_pkg.run_verify(env, task, resp)
 
+    def _native_catalog(method):
+        """Which memory enters the discoverable catalog for this method (native mode). ace/external
+        keep their playbook/frozen-skill TEXT in the prompt (via inject) + an EMPTY catalog, so the
+        C1 contrast is clean: dump-everything-in-context (ace) vs agent-selects-from-catalog (ours)."""
+        if method == "ours_full":
+            return store.load(), episodic.load(), True
+        if method == "ours_mem":
+            return store.load(), [], False
+        if method == "episodic":
+            return [], episodic.load(), False
+        return [], [], False     # no_memory / ace / external_optimizer
+
+    _NATIVE_NUDGE = (
+        "\n\nYou have access to project Skills capturing lessons and worked examples distilled from "
+        "PAST tasks. Review the available skills and INVOKE any that are genuinely relevant before you "
+        "answer; if none apply, just answer. Then give your final answer in the required format."
+    )
+    _POST_HOOK = ENGINE_DIR / "adapters" / "claude_code" / "hook_post_tool_use.py"
+
+    def native_solve(task, mem_block, extra_skills=None, want_cost=False):
+        """Skill-discovery-enabled solve (the deploy-faithful NATIVE path). Materializes memory + the
+        promoted skills as a discoverable .claude/skills catalog in a per-task sandbox, lets the agent
+        invoke what it needs over a few turns, and credits exactly what it INVOKED (read from a
+        PostToolUse hook). The harness repair loop is bypassed (native self-correction), mirroring the
+        --agentic branch. Returns (resp, ev, meta) with meta['invoked_ids'] = distilled-bullet ids used.
+        `extra_skills` (a list of (name, md) pairs) adds CANDIDATE skills to the catalog — the gate's
+        'full' arm presents candidates as discoverable, exactly as inference would present them active."""
+        items, eps, inc_promoted = _native_catalog(args.method)
+        sandbox = tempfile.mkdtemp(prefix="native_")
+        invoked_path = os.path.join(sandbox, ".invoked")
+        cost = 0.0
+        try:
+            known_names = materialize.setup_sandbox(
+                sandbox, _POST_HOOK, invoked_path, items=items, episodes=eps,
+                include_promoted=inc_promoted, extra_skills=(extra_skills or None))
+            prompt = env.build_prompt(task, mem_block) + _NATIVE_NUDGE
+            resp = ""
+            try:
+                r = llm.call_claude(
+                    prompt, allowed_tools=args.skill_tools, cwd=sandbox, add_dir=sandbox,
+                    setting_sources="project", permission_mode="bypassPermissions",
+                    max_turns=args.skill_turns, max_retries=1, timeout=900, return_cost=True)
+                resp, c = r if isinstance(r, tuple) else (r, 0.0)
+                cost += c
+            except Exception as exc:                       # turn-cap overflow / transient
+                sys.stderr.write("native target error: %s\n" % exc)
+            try:
+                log = open(invoked_path, encoding="utf-8").read() if os.path.exists(invoked_path) else ""
+            except Exception:
+                log = ""
+            invoked = materialize.match_invoked(log, known_names)
+            invoked_ids = materialize.invoked_to_bullet_ids(invoked)
+            try:
+                ev = env.score(task, resp)
+            except Exception as exc:
+                sys.stderr.write("score error: %s\n" % exc)
+                ev = {"em": 0.0, "f1": 0.0, "sub_em": 0.0, "predicted_answer": ""}
+            if isinstance(ev, dict):
+                ev["_native"] = True
+                ev["_invoked"] = invoked
+            return resp, ev, {"repair_calls": 0, "signatures": [], "cost": cost,
+                              "trace": [], "invoked_ids": invoked_ids}
+        finally:
+            if os.environ.get("NATIVE_EVOLVE_KEEP_SANDBOX") != "1":
+                shutil.rmtree(sandbox, ignore_errors=True)
+
+    def _credit_ids(injected_ids, meta):
+        """Bullets to credit for a learned task: what the agent INVOKED (native) or, in the legacy
+        inject mode, what the harness injected. Keeps all credit call-sites mode-agnostic."""
+        if args.memory_mode == "native":
+            return meta.get("invoked_ids", []) if isinstance(meta, dict) else []
+        return injected_ids
+
     def solve(task, mem_block, want_cost=False):
         """Single-shot target call + up to REPAIR_TURNS CONDITIONAL repair rounds. A round fires
         only when env.verify (REFERENCE-FREE; reads no gold) rejects the attempt, so the loop is
         valid even during the frozen TEST phase and costs nothing when the first attempt verifies.
         Returns (resp, ev, meta) with meta = {repair_calls, signatures, cost, trace}; `trace` is the
         list of error->fix pairs used by repair-grounded reflection (Phase 2)."""
+        if args.memory_mode == "native":
+            # Deploy-faithful: memory/skills as a discoverable catalog, agent selects natively.
+            # (Mutually exclusive with --agentic's heavyweight write/run/repair sandbox.)
+            return native_solve(task, mem_block, extra_skills=None, want_cost=want_cost)
         base = env.build_prompt(task, mem_block)
         cost = [0.0]
 
@@ -558,6 +717,15 @@ def main():
         """Build the injected memory/skill block for the current method (read-only retrieval)."""
         q = task["question"]
         injected_ids = []
+        if args.memory_mode == "native":
+            # ours_*/episodic memory becomes the discoverable CATALOG (built in native_solve), not
+            # in-prompt text -> no injected_ids (credit = what the agent invokes). ace/external still
+            # put their playbook/frozen-skill text in the prompt (the single-tier-dump contrast).
+            if args.method == "ace":
+                return retrieve.full_playbook_block(), []
+            if args.method == "external_optimizer":
+                return (("## Skill (offline-optimized, frozen)\n" + frozen_skill) if frozen_skill else ""), []
+            return "", []
         if args.method == "episodic":
             mem = episodic.exemplar_block(q)                    # raw past-success exemplars (episodic-only)
         elif args.method == "ours_mem":
@@ -613,12 +781,15 @@ def main():
                                     signature=(ev.get("_repair_signatures") or [""])[-1])
                 except Exception as exc:
                     sys.stderr.write("episode record error @%d: %s\n" % (idx, exc))
-            # credit distilled bullets that were injected (deterministic; A2 signal = --credit_signal)
-            if args.method in ("ours_mem", "ours_full") and injected_ids:
-                try:
-                    curate.credit(injected_ids, succ)
-                except Exception as exc:
-                    sys.stderr.write("credit error @%d: %s\n" % (idx, exc))
+            # credit distilled bullets (deterministic; A2 signal = --credit_signal). native: what the
+            # agent INVOKED (meta.invoked_ids); inject: what was force-injected (injected_ids).
+            if args.method in ("ours_mem", "ours_full"):
+                cids = _credit_ids(injected_ids, meta)
+                if cids:
+                    try:
+                        curate.credit(cids, succ)
+                    except Exception as exc:
+                        sys.stderr.write("credit error @%d: %s\n" % (idx, exc))
             # reflect -> distilled memory (promote_skills=False: consolidation is the gated induce step)
             if args.method in ("ours_mem", "ours_full", "ace"):
                 try:
@@ -719,7 +890,7 @@ def main():
         learn_ex = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.learn_workers))
         learn_futs = []
 
-        def learn_job(task, resp, ev, injected_ids):
+        def learn_job(task, resp, ev, credit_ids):
             deltas = []
             # reffree verdict + reflection evidence (A2/A3) OUTSIDE the lock — the expensive parallel half
             succ, evi = _learn_signals(task, resp, ev)
@@ -740,9 +911,9 @@ def main():
                         curate.merge(deltas)
                     except Exception as exc:
                         sys.stderr.write("curate error: %s\n" % exc)
-                if args.method in ("ours_mem", "ours_full") and injected_ids:
+                if args.method in ("ours_mem", "ours_full") and credit_ids:
                     try:
-                        curate.credit(injected_ids, succ)
+                        curate.credit(credit_ids, succ)
                     except Exception as exc:
                         sys.stderr.write("credit error: %s\n" % exc)
 
@@ -752,7 +923,8 @@ def main():
             mem_block, injected_ids = inject(task)           # live retrieval (eventually-consistent)
             resp, ev, meta = solve(task, mem_block, want_cost=True)   # repair loop + robust errors
             cost = meta["cost"]
-            learn_futs.append(learn_ex.submit(learn_job, task, resp, ev, injected_ids))  # async learn
+            credit_ids = _credit_ids(injected_ids, meta)             # native: invoked; inject: injected
+            learn_futs.append(learn_ex.submit(learn_job, task, resp, ev, credit_ids))  # async learn
             sys.stderr.write("[%s seed%d %s/serve] %3d/%d em=%.0f mem@serve=%d rep=%d $%.4f\n"
                              % (args.method, args.seed, phase, idx + 1, len(stream),
                                 ev["em"], mem_at_serve, meta["repair_calls"], cost))
@@ -818,11 +990,13 @@ def main():
                                         signature=(ev.get("_repair_signatures") or [""])[-1])
                     except Exception as exc:
                         sys.stderr.write("episode record error @%d: %s\n" % (s["idx"], exc))
-                if args.method in ("ours_mem", "ours_full") and injected_ids:
-                    try:
-                        curate.credit(injected_ids, succ)
-                    except Exception as exc:
-                        sys.stderr.write("credit error @%d: %s\n" % (s["idx"], exc))
+                if args.method in ("ours_mem", "ours_full"):
+                    credit_ids = _credit_ids(injected_ids, meta)
+                    if credit_ids:
+                        try:
+                            curate.credit(credit_ids, succ)
+                        except Exception as exc:
+                            sys.stderr.write("credit error @%d: %s\n" % (s["idx"], exc))
                 if args.method in ("ours_mem", "ours_full", "ace"):
                     try:
                         reflect.run(summary=evi, promote_skills=False)
