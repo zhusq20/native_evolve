@@ -209,6 +209,27 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-08  (session 16 cont. — METHODOLOGY: vendor the OFFICIAL IFEval verifiers; "reuse official scoring, don't reimplement")
+Prompted by the user's audit ("is the self-implemented eval code necessary?"), paid down a faithfulness debt.
+The old `ifbench.py` was a stdlib REGEX REIMPLEMENTATION of IFEval — its own docstring admitted "close, not
+identical": only 23/25 instruction types, nltk tokenizers regex-approximated (word/sentence counts diverge near
+boundaries), and `repeat_prompt`/`end_checker`/`postscript` leniency-divergent. Since em is prompt-level STRICT
+(one verifier flips → whole prompt flips), our IFBench em could differ from published IFEval. **NOW vendors
+google-research's `instructions{,_registry,_util}.py` VERBATIM into `eval/envs/ifeval_lib/`** (the same discipline
+as `sb_lib/` vendoring SkillOpt's executor) and replicates the official strict-check loop
+(`build_description(**kwargs)` → re-build with the prompt if the instruction needs it → `check_following`). All 25
+types (incl. `language:response_language` via langdetect + `nth_paragraph_first_word`). **TYPE-1 preserved:
+`verify()`==`score()` (same `_check_all`) → the reference-free signal == the gold criterion BY CONSTRUCTION.**
+Deps added (`requirements.txt`): nltk(+punkt)/langdetect/immutabledict/absl-py. Regenerated `ifbench_val.jsonl`
+(full coverage). Tests: `eval/test_ifbench_env.py` 24/24 (+ arc 27/27), zero spend.
+**The principle (now explicit): REUSE official scoring (vendor it), never reimplement.** This leaves `arc` as the
+ONLY remaining fully-self-implemented env (P5 released no generator + real ARC isn't family-labeled, so custom was
+justified — but it carries a "our-ARC-not-standard, no external comparability" caveat; treat ARC as a CONTROLLED
+DIAGNOSTIC, not a comparability headline). IFBench is now faithful + type-1 + integrated → the strongest env for
+the reference-free/gate claim. NEXT (the arc/ifbench tradeoff): a constraint-FAMILY-focused IFBench frozen
+gate_audit (type-1 + shared procedure → the cleanest shot at the positive case on a FAITHFUL env), with ARC kept
+for the demo-CV mechanism test + the (custom-env) +0.50 memory datapoint.
+
 ### 2026-06-07  (session 16 cont. — MAKE-OR-BREAK group_by_shape gate run → HUGE clean memory win (+0.50 monotone) + a SHARPER precision law: "executable ≠ precise"; the hoped reffree-preserves-activation POSITIVE case did NOT land, for an informative reason)
 Ran the billed frozen `group_by_shape` gate_audit run (arc_gbs.jsonl, train24/val18/test18, induce_every12,
 no_memory + ours_full, **repair OFF**, lexical, seed0, `--gate_audit`; **$15.6** — ours_full $13.5 ran over the
