@@ -14,6 +14,14 @@ loop. Reflect → curate (deterministic) → promote-with-gate, via Claude Code 
 - **C1** two-tier (memory + gated skill) + top-k retrieval  >  single-tier ACE playbook.
 - **C2** native *online* self-evolution  ≥  external *offline* optimizer, at lower total cost.
 
+> **⚠️ PIVOT (session 18, 2026-06-08).** Headline is now **C1 — the memory↔skill BOUNDARY** — studied under
+> the OFFLINE **`--protocol frozen`** protocol (train-with-gold → FREEZE → deploy-frozen; oracle signals =
+> default). **C2 is SET ASIDE** (train-with-gold+freeze IS the offline-optimizer protocol). The reference-free
+> / precision-law / "native verifier" line (sessions 14–17) is DEMOTED to supporting material; verify is no
+> longer load-bearing (gold drives train; frozen deploy learns nothing). Boundary thesis: *consolidate
+> memory→a gated skill ONLY where a shared latent procedure spans a task FAMILY; else keep episodic memory.*
+> See the session-18 changelog entry + `memory/refocus-memory-over-verification.md`.
+
 ## Method abstraction (eval/prequential.py, test-then-train / prequential)
 For a shuffled task stream, each task is first **evaluated** (test) with the memory built
 from tasks `1..i-1`, then **learned from** (train). Cumulative cost is logged per task so
@@ -211,6 +219,55 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-08  (session 18 — STRATEGIC PIVOT: refocus on the memory↔skill BOUNDARY (C1) under the OFFLINE frozen+gold protocol; verification line DEMOTED to supporting; zero spend this session)
+The user flagged that sessions 14–17 had drifted from the original memory/skill thesis INTO verification
+(the reference-free SIGNAL refactor → precision-law → gate audits → session-18's "native agent verifier for
+ALL datasets" plan). Two decisions, both the user's, recorded here as the project's new direction.
+
+**Decision 1 — A 为主、B 作支撑.** memory/skill (C1/C2) is the headline; verification = MINIMAL supporting
+infra + the precision-law as an explanatory chapter, NOT the contribution. DROPPED the session-18 "native
+verifier for ALL datasets / make every env solve agentically" expansion (scope B / Phases 3–4 of
+`docs/native_verifier_plan.md`).
+
+**Decision 2 — adopt the OFFLINE protocol; accept the C2 tradeoff.** Headline protocol is now
+**`--protocol frozen`: train-with-gold → FREEZE memory+skills → deploy-frozen on held-out test** (the standard
+skill-formation setup; measures REUSE not local adaptation). This needs NO new code — `--protocol frozen`
+(`--n_train/--n_val/--n_test`, `--stratify_key`) already exists and the signal flags
+(`--gate/credit/reflect_signal`) **default to `oracle` (gold)**. CONSEQUENCE the user consciously accepted:
+this IS the offline-optimizer protocol, so **C2 (native online reference-free ≥ offline optimizer) is SET
+ASIDE** (demoted to a possible side-ablation: gold→reffree / frozen→online "how much is lost"). C1/the
+boundary is KEPT and is CLEANER under freeze. **Under frozen+gold, verify is NOT load-bearing** (gold drives
+training; frozen deploy learns nothing) → it's an optional knob. This reverses the session-14
+`native-design-law` "ONE reference-free online loop" north star → that memory + `docs/signal_and_gold_policy.md`
++ `docs/native_verifier_plan.md` are now marked SUPERSEDED/supporting.
+
+**The boundary thesis (sharpened, = what C1 should claim):** *consolidate memory → a GATED skill ONLY where a
+shared latent procedure spans a task FAMILY; keep episodic memory for singleton/diverse tasks; the gate is the
+mechanism that enforces this boundary.* Already supported in spirit by prior data (episodic wins on diverse SB;
+consolidation wins on shared-procedure searchqa; the +0.50 ARC group_by_shape memory lift). The crux not yet
+isolated: does the SKILL tier add anything OVER memory? → needs the **skill-OFF arm** (`--induce_every 0`,
+confirmed at `prequential.py:700`) = ours_full minus skill induction (degrades to episodic+distilled).
+
+**Done this session (ZERO claude spend):**
+- `eval/stats.py` (NEW) — the P0 stats gap: **paired McNemar exact test + paired bootstrap 95% CI** on per-task
+  `em` from two methods' `tasks.jsonl`, matched by id, pooled across seeds. Pure stdlib (3.9-safe). Self-test
+  green (`python3 eval/stats.py --self-test`).
+- Confirmed the boundary experiment is fully supported by existing flags: `--protocol frozen --env arc
+  --stratify_key family` (ARC tasks carry `family`/`skill`, `arc_gen.py:330`); arms {no_memory, episodic,
+  ours_mem, ours_full, ace, external_optimizer} are env-agnostic; `--induce_every 0` = skill-OFF.
+- Recorded the pivot: PROGRESS banner + this entry; `memory/refocus-memory-over-verification.md` (extended) +
+  `native-design-law.md` (demoted) + MEMORY.md; SUPERSEDED headers on the two north-star docs.
+
+**NEXT — the C1/boundary experiment on ARC (frozen+gold), budget-gated tiers:**
+- **Tier 1 — smoke (~$15–25, 1 seed):** family-rich split, arms {no_memory, ours_full, ours_full skill-OFF
+  (`--induce_every 0`)}. Question: does the SKILL tier add anything OVER episodic+distilled memory? (Isolates
+  the boundary; extends the session-16 +0.50 with the missing skill-OFF arm.)
+- **Tier 2 — make-or-break (~$40–70):** if Tier 1 shows a skill-tier signal, add the single-tier baselines
+  (ace, external_optimizer) + go to ≥3 seeds + significance via `eval/stats.py`.
+- **Tier 3:** the singleton/diverse split → draw the OTHER side of the boundary (episodic should win, gate
+  should reject) → the full boundary map.
+- (Carried, now supporting only) the reference-free / precision-law results stand as an explanatory chapter.
+
 ### 2026-06-08  (session 17 — apply "reuse official scoring, don't reimplement" to ARC: align score() with the official ARC-AGI kernel; the GENERATOR stays custom for a documented reason)
 The user asked to align ARC's evaluation code with the "original" and reuse it rather than self-implement.
 Investigated, then split the env cleanly into a CUSTOM generator (justified) + OFFICIAL-faithful scoring (now vendored).
