@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="460" font-family="Helvetica,Arial,sans-serif">
+<rect width="720" height="460" fill="white"/>
+<text x="70.0" y="26.0" font-size="16" fill="#222" text-anchor="start" font-weight="bold">Accuracy vs cumulative cost (arc_gbs_gateAB)</text>
+<line x1="70.0" y1="404.0" x2="490.0" y2="404.0" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="408.0" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.0</text>
+<line x1="70.0" y1="332.4" x2="490.0" y2="332.4" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="336.4" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.2</text>
+<line x1="70.0" y1="260.8" x2="490.0" y2="260.8" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="264.8" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.4</text>
+<line x1="70.0" y1="189.2" x2="490.0" y2="189.2" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="193.2" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.6</text>
+<line x1="70.0" y1="117.6" x2="490.0" y2="117.6" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="121.6" font-size="11" fill="#666" text-anchor="end" font-weight="normal">0.8</text>
+<line x1="70.0" y1="46.0" x2="490.0" y2="46.0" stroke="#e8e8e8" stroke-width="1"/>
+<text x="62.0" y="50.0" font-size="11" fill="#666" text-anchor="end" font-weight="normal">1.0</text>
+<line x1="70.0" y1="46.0" x2="70.0" y2="404.0" stroke="#333" stroke-width="1"/>
+<line x1="70.0" y1="404.0" x2="490.0" y2="404.0" stroke="#333" stroke-width="1"/>
+<text x="280.0" y="444.0" font-size="12" fill="#222" text-anchor="middle" font-weight="normal">cumulative cost (USD, incl. self-evolution / training)</text>
+<text transform="rotate(-90 18 225.0)" x="18.0" y="225.0" font-size="12" fill="#222" text-anchor="middle" font-weight="normal">prequential EM</text>
+<text x="70.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">$0.00</text>
+<text x="154.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">$2.76</text>
+<text x="238.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">$5.53</text>
+<text x="322.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">$8.29</text>
+<text x="406.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">$11.05</text>
+<text x="490.0" y="422.0" font-size="10" fill="#666" text-anchor="middle" font-weight="normal">$13.82</text>
+<polyline points="74.5,404.0 77.4,225.0 79.6,165.3 83.6,135.5 90.7,189.2 94.1,225.0 98.1,250.6 102.9,269.8 106.0,284.7 108.5,260.8 110.8,273.8 114.5,254.8 115.9,266.3 119.6,250.6 121.4,236.9 124.5,247.4 128.7,256.6 131.5,244.9" fill="none" stroke="#888888" stroke-width="2.4"/>
+<line x1="504.0" y1="52.0" x2="526.0" y2="52.0" stroke="#888888" stroke-width="3"/>
+<text x="532.0" y="56.0" font-size="11" fill="#222" text-anchor="start" font-weight="normal">no-memory (lower bound) (0.444)</text>
+<polyline points="437.7,46.0 440.5,46.0 442.9,46.0 445.0,46.0 448.5,46.0 452.5,105.7 454.8,97.1 457.4,90.8 461.1,85.8 463.2,81.8 466.0,78.5 467.7,75.8 469.4,73.5 472.4,71.6 473.9,69.9 476.2,68.4 478.3,67.1 481.8,65.9" fill="none" stroke="#1f77b4" stroke-width="2.4"/>
+<line x1="504.0" y1="72.0" x2="526.0" y2="72.0" stroke="#1f77b4" stroke-width="3"/>
+<text x="532.0" y="76.0" font-size="11" fill="#222" text-anchor="start" font-weight="normal">ours-full (episodic+distilled+gated skill) (0.944)</text>
+</svg>

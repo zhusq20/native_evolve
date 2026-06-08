@@ -209,6 +209,53 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-07  (session 16 cont. — MAKE-OR-BREAK group_by_shape gate run → HUGE clean memory win (+0.50 monotone) + a SHARPER precision law: "executable ≠ precise"; the hoped reffree-preserves-activation POSITIVE case did NOT land, for an informative reason)
+Ran the billed frozen `group_by_shape` gate_audit run (arc_gbs.jsonl, train24/val18/test18, induce_every12,
+no_memory + ours_full, **repair OFF**, lexical, seed0, `--gate_audit`; **$15.6** — ours_full $13.5 ran over the
+~$10 estimate: the val A/B at @11 + a double consolidate at @23 added cost).
+
+**RESULT 1 — the biggest CLEAN memory lift in the project (C1):**
+| method | test EM | rescued / broke | cell-F1 | cost |
+|---|---|---|---|---|
+| no_memory | 0.444 (8/18) | — | 0.958 | $2.02 |
+| **ours_full** | **0.944 (17/18)** | **9 / 0 (MONOTONE)** | 0.999 | $13.54 |
+**+0.50 EM, 9 rescued / 0 broken**, repair off, on a PRECISE-signal family-structured env. The group-by-shape
+SELECTION procedure transfers across ALL skills (rescues span border×4, flip×3, keep×1, recolor×1). This is the
+"memory helps a lot where a TRANSFERABLE PROCEDURE is genuinely missing" thesis at full strength. **Attribution
+caveat:** ours_full at test = 9 distilled bullets + episodic + 1 (thinly) activated skill → the +0.50 is the
+COMBINED memory effect, NOT isolated to the skill (no skill-OFF arm; the bullets already encode the procedure).
+1 seed, n=18 → strong SIGNAL.
+
+**RESULT 2 — first genuinely-good induced skill, but the activation is NOT robust:** the reflector induced an
+excellent group-by-shape procedure skill (`arc-family-procedure-not-hacks`: "extract objects via 4-conn flood
+fill → select by family criteria → apply transform per object → redraw on blank grid; do NOT add per-grid
+hacks"). The gold **single-round** gate (gate_audit uses `gate_tally`, NOT the accumulated `rolling_gate`)
+activated it at @23 (oracle rescued **2/3** base-failures, broke 0, full-base=+2 = exactly margin). BUT the
+PRODUCTION accumulated rolling_gate would REJECT: per-round full-base deltas @11/@23a/@23b = +1/+2/−2 →
+cumulative ≈ +1 < margin. So **NOT a robust skill activation** (thin favorable single round, n=18, 1 seed — same
+caution as session-13). The durable win lives in MEMORY/bullets; the skill tier stays marginal — the consistent
+project story, now with a +0.50 memory effect behind it. (Minor harness quirk noted: the inducer drafted 3
+near-duplicate skills with different names across checkpoints.)
+
+**RESULT 3 — the key SCIENCE: the precision law sharpens to "EXECUTABLE ≠ PRECISE; the reference-free signal must
+test the GOLD CRITERION, not a proxy."** At the activating checkpoint the **reffree gate DISAGREED with oracle**
+(AGREE=False: reffree rejected, rescued2/broke3). Across ALL checkpoints **`base_fail_agree` ≈ 0.0–0.33** — the
+reffree (pass-the-SHOWN-DEMOS) signal is BLIND to the gold base-failures: a program can reproduce the few demos
+yet fail held-out (it overfits the demos). **Few-shot demos UNDERDETERMINE the generalization rule**, so the
+deploy-available reference-free check tests CONSISTENCY-WITH-SHOWN-EXAMPLES, not GENERALIZATION (what gold scores).
+⇒ being "executable" is necessary but NOT sufficient for a trustworthy no-gold gate; the check must test the SAME
+criterion as gold. This UNIFIES dyck (NL self-critique tests "looks plausible," not "is correct") and ARC (demos
+test "consistent," not "generalizes") — both reference-free signals are PROXIES → blind. **The hoped POSITIVE case
+(a PRECISE reffree gate PRESERVES a gold activation) did NOT materialize — and the reason (proxy-vs-criterion) is
+more informative than a trivial confirmation.** Results/figs: `results/arc_gbs_gateAB/` (+ `gate_audit.json`).
+
+**NEXT (this result directly motivates it): make the ARC reffree signal PRECISE-FOR-GENERALIZATION, then re-audit.**
+Two deploy-available ways to close the proxy gap WITHOUT gold: (a) more demos (passing K=8 implies the rule far
+better than K=4); (b) **demo cross-validation** — split the SHOWN examples into fit/check, score reffree on the
+held-back SHOWN examples (still no gold). If a precise-for-generalization reffree signal THEN tracks oracle →
+the real positive case. Also: ≥3 seeds + P0 stats on the +0.50 (already monotone → likely robust); a skill-OFF
+arm (`--induce_every 0`) to isolate the skill's marginal test contribution from the bullets'.
+
 ### 2026-06-07  (session 16 — BUILT the ARC-AGI Stream env: the precise-signal + family-structure regime the gate needs; zero spend, fully validated; + the "can we just turn knobs?" analysis)
 The session-15 conclusion was that NO current env has BOTH a PRECISE reference-free signal AND a robustly-
 beneficial gate-activating skill (SB precise-but-rejects; dyck activates-but-blind; IFBench precise-but-rejects),
