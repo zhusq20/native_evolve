@@ -40,6 +40,7 @@ def call_claude(
     setting_sources="user",
     timeout=600,
     return_cost=False,
+    return_meta=False,
     permission_mode="acceptEdits",
     max_turns=None,
     max_retries=None,
@@ -87,9 +88,14 @@ def call_claude(
                         if isinstance(obj, dict) and "result" in obj:
                             cost = float(obj.get("total_cost_usd") or 0.0)
                             _log_ledger(obj)
+                            if return_meta:                     # full session meta (cost + actual turns)
+                                return obj["result"], {"cost": cost,
+                                                       "num_turns": int(obj.get("num_turns") or 0)}
                             return (obj["result"], cost) if return_cost else obj["result"]
                     except Exception:
                         pass
+                    if return_meta:                             # non-JSON fallback: turns unknown
+                        return out, {"cost": 0.0, "num_turns": 0}
                     return (out, 0.0) if return_cost else out   # non-JSON but non-empty: rare
                 last_err = "empty stdout"
             else:

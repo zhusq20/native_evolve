@@ -405,52 +405,92 @@ def main():
                                    # PERIODIC one already hit whenever train_n % induce_every == 0 (identical
                                    # episode set -> identical induce+gate, pure waste + near-dup skills).
                                    # Distinct periodic idxs never collide, so this only suppresses the repeat.
+    def _render_pool_block(bullets):
+        """Render the un-consolidated distilled memory as the deterministic injection block both gate
+        arms load (the fixed `base`). A LESSONS list — NOT raw task->answer exemplars — so re-solving a
+        source task with the pool loaded stays non-trivial (a lesson generalizes; it is not the answer),
+        which is what lets the +skill A/B show signal on the same data."""
+        if not bullets:
+            return ""
+        lines = ["## Lessons distilled from earlier tasks (apply when relevant)"]
+        for b in bullets:
+            c = (b.get("content", "") or "").strip()
+            if c:
+                lines.append("- " + c)
+        return "\n".join(lines) if len(lines) > 1 else ""
+
+    def _gate_solve(task, mem_text):
+        """CONTROLLED gate solve: the agent loads EXACTLY `mem_text` in its prompt (deterministic
+        injection — NO native catalog, NO discovery) and may RUN code (skill_tools) over skill_turns, so
+        a procedure skill can actually execute. The lone A/B variable is whether `mem_text` includes the
+        candidate skill. Returns the response string (gold-scored by the gate_judge)."""
+        sandbox = tempfile.mkdtemp(prefix="gate_")
+        try:
+            r = llm.call_claude(
+                env.build_prompt(task, mem_text), allowed_tools=args.skill_tools,
+                cwd=sandbox, add_dir=sandbox, permission_mode=args.permission_mode,
+                max_turns=args.skill_turns, max_retries=1, timeout=900, return_meta=True)
+            return r[0] if isinstance(r, tuple) else r
+        except Exception as exc:
+            sys.stderr.write("gate_solve error: %s\n" % exc)
+            return ""
+        finally:
+            if os.environ.get("NATIVE_EVOLVE_KEEP_SANDBOX") != "1":
+                shutil.rmtree(sandbox, ignore_errors=True)
+
     def consolidate(idx):
-        """GATED consolidation, CLUSTER-SCOPED (within failure mode). For each failure `signature` with
-        enough episodes, induce ONE skill from that cluster's TRAIN half, then ACTIVATE it iff it lifts
-        pass-rate on the cluster's held-out GATE half. The A/B is a CONTROLLED skill-text injection —
-        read / don't-read THIS skill — over a FIXED base = the train-half samples it was distilled from
-        (NOT the eval-time retrieval, NOT the native catalog), so the lone variable between arms is the
-        skill. No cross-task generalization is required (only within-cluster lift); the frozen test split
-        stays the honest generalization referee. Each cluster decides independently, so a skill that
-        fails its own gate degrades to a candidate (ours_full never drops below episodic+distilled)."""
+        """POOLED, SAME-DATA consolidation (user design — replaces the cluster-scoped held-out gate).
+        Show Claude ALL un-consolidated distilled memory at once and let IT decide which lessons to
+        package into skill(s) (`induce.induce`, no per-signature count threshold) — so a small / native
+        stream, where failure signatures are sparse or absent, still yields candidates (this fixes the
+        cluster gate starving for >=4 same-signature episodes). Then gate each candidate on the SAME data
+        it was made from, with NO held-out split (per user): the agent deterministically LOADS the pool
+        memory as the fixed `base`, and the A/B's lone variable is whether the candidate skill is ALSO
+        loaded. Accept iff +skill lifts pass-rate (margin, non-diluting). This is deliberately a same-data
+        FIT check (train==gate) that never starves for samples; the frozen TEST split remains the honest
+        out-of-sample GENERALIZATION referee, so the gate's optimism is bounded by an unseen metric."""
         if idx in _consolidated_idx:                 # already consolidated at this index (see _consolidated_idx)
             return
         _consolidated_idx.add(idx)
-        cands = induce.induce_clustered(min_cluster=args.cluster_min)
+        pool = [b for b in store.load() if b.get("status") == "active"]  # all un-consolidated distilled memory
+        cands = induce.induce(model_items=pool, focus_failures=False)    # Claude decides over the WHOLE pool
         if not cands:
             return
+        # gate set = the data BEHIND the memory: every distinct episode's task (NO held-out, per user).
+        seen, gate_tasks = set(), []
+        for e in episodic.load():
+            tid = e.get("id")
+            if tid and tid not in seen and tid in task_by_id:
+                seen.add(tid)
+                gate_tasks.append(task_by_id[tid])
+        if not gate_tasks:
+            return
+        base = _render_pool_block(pool)              # deterministic load of the pool memory (controlled)
         gate_judge = make_judge(args.gate_signal, env, self_verify_mod.self_verify)
         for c in cands:
-            # base = the TRAIN-half successes this skill was summarized from, rendered as worked
-            # examples and held FIXED across both arms (controlled: the skill text is the lone variable).
-            base = episodic.exemplar_block_from([e for e in c["train_eps"] if e.get("passed")])
             skill_text = retrieve.render_skills_block(
                 [{"name": c["name"], "md": c["md"], "value": 0}], "", k=1)
-            full = "\n\n".join(x for x in (base, skill_text) if x)        # base THEN skill (inject order)
+            full = "\n\n".join(x for x in (base, skill_text) if x)        # base THEN skill (load order)
 
-            def _pair(ep):
-                task = task_by_id.get(ep.get("id"))
-                if task is None:
-                    return None                                          # no gold for this id -> skip
-                rb = solve(task, base, want_cost=True)[0]                 # WITHOUT this skill
-                rf = solve(task, full, want_cost=True)[0]                 # READING this skill
+            def _pair(task, _full=full):
+                rb = _gate_solve(task, base)                              # load pool memory, WITHOUT skill
+                rf = _gate_solve(task, _full)                            # load pool memory + READ this skill
                 return {"base_em": int(bool(gate_judge(task, rb))),
                         "full_em": int(bool(gate_judge(task, rf)))}
-            rows = [r for r in llm.pmap(_pair, c["gate_eps"], args.deploy_workers) if r]
+            rows = [r for r in llm.pmap(_pair, gate_tasks, args.deploy_workers) if r]
 
             bp = sum(r["base_em"] for r in rows)
             fp = sum(r["full_em"] for r in rows)
             rescued = sum(1 for r in rows if r["base_em"] == 0 and r["full_em"] == 1)
             broke = sum(1 for r in rows if r["base_em"] == 1 and r["full_em"] == 0)
-            # within-cluster accept: any lift past the margin, non-diluting. NO power floor (clusters
-            # are small by design); the test split measures whether these cluster-local skills generalize.
+            # same-data accept: any lift past the margin, non-diluting. NO held-out, NO power floor (per
+            # user); the frozen TEST split is the out-of-sample referee that catches an over-fit skill.
             activate = bool(rows and (fp - bp) >= args.cluster_gate_margin and broke <= rescued)
             induce.write_skill(c, status=("active" if activate else "candidate"))
             sys.stderr.write(
-                "[consolidate cluster @%d] sig=%s skill=%s gate_n=%d base=%d -> +skill=%d "
+                "[consolidate pooled @%d] skill=%s gate_n=%d base=%d -> +skill=%d "
                 "(rescued=%d broke=%d) => %s\n"
-                % (idx, c.get("signature", "?"), c["name"], len(rows), bp, fp, rescued, broke,
+                % (idx, c["name"], len(rows), bp, fp, rescued, broke,
                    "ACTIVATE" if activate else "candidate (degrade)"))
 
     LEARN_METHODS = ("episodic", "ours_mem", "ours_full", "ace")
@@ -528,6 +568,7 @@ def main():
         sandbox = tempfile.mkdtemp(prefix="native_")
         invoked_path = os.path.join(sandbox, ".invoked")
         cost = 0.0
+        nturns = 0                                             # actual agent turns (claude num_turns)
         try:
             known_names = materialize.setup_sandbox(
                 sandbox, _POST_HOOK, invoked_path, items=items, episodes=eps,
@@ -538,9 +579,10 @@ def main():
                 r = llm.call_claude(
                     prompt, allowed_tools=args.skill_tools, cwd=sandbox, add_dir=sandbox,
                     setting_sources="project", permission_mode=args.permission_mode,
-                    max_turns=args.skill_turns, max_retries=1, timeout=900, return_cost=True)
-                resp, c = r if isinstance(r, tuple) else (r, 0.0)
-                cost += c
+                    max_turns=args.skill_turns, max_retries=1, timeout=900, return_meta=True)
+                resp, m = r if isinstance(r, tuple) else (r, {})
+                cost += m.get("cost", 0.0)
+                nturns = int(m.get("num_turns", 0) or 0)       # actual turns the agent self-paced
             except Exception as exc:                       # turn-cap overflow / transient
                 sys.stderr.write("native target error: %s\n" % exc)
             try:
@@ -558,7 +600,7 @@ def main():
                 ev["_native"] = True
                 ev["_invoked"] = invoked
             return resp, ev, {"repair_calls": 0, "signatures": [], "cost": cost,
-                              "trace": [], "invoked_ids": invoked_ids}
+                              "trace": [], "invoked_ids": invoked_ids, "num_turns": nturns}
         finally:
             if os.environ.get("NATIVE_EVOLVE_KEEP_SANDBOX") != "1":
                 shutil.rmtree(sandbox, ignore_errors=True)
@@ -740,6 +782,7 @@ def main():
             "max_uses": max((b.get("uses", 0) for b in bullets), default=0),
             "max_helpful": max((b.get("helpful", 0) for b in bullets), default=0),
             "n_active_skills": n_active_skills, "repair_calls": meta["repair_calls"],
+            "num_turns": meta.get("num_turns", 0),
             "cum_cost_usd": round(cc, 6), "cum_output_tokens": ct,
         }
         sys.stderr.write(
@@ -774,7 +817,8 @@ def main():
                                 ev["em"], ev["f1"], meta["repair_calls"], cost))
             return {"idx": idx, "id": task["id"], "em": ev["em"], "f1": ev["f1"],
                     "sub_em": ev["sub_em"], "pred": ev["predicted_answer"][:80],
-                    "repair_calls": meta["repair_calls"], "_cost": cost}
+                    "repair_calls": meta["repair_calls"], "num_turns": meta.get("num_turns", 0),
+                    "_cost": cost}
 
         partials = llm.pmap(one, list(enumerate(stream)), args.deploy_workers)
         out_rows, run = [], c0
@@ -785,7 +829,7 @@ def main():
                 "sub_em": p["sub_em"], "pred": p["pred"], "n_bullets": stat["n_bullets"],
                 "n_episodes": stat["n_episodes"], "max_uses": stat["max_uses"],
                 "max_helpful": stat["max_helpful"], "n_active_skills": stat["n_active_skills"],
-                "repair_calls": p["repair_calls"],
+                "repair_calls": p["repair_calls"], "num_turns": p["num_turns"],
                 "cum_cost_usd": round(run, 6), "cum_output_tokens": 0,
             })
         return out_rows
@@ -861,7 +905,8 @@ def main():
                                 ev["em"], mem_at_serve, meta["repair_calls"], cost))
             return {"idx": idx, "id": task["id"], "em": ev["em"], "f1": ev["f1"],
                     "sub_em": ev["sub_em"], "pred": ev["predicted_answer"][:80],
-                    "mem_at_serve": mem_at_serve, "repair_calls": meta["repair_calls"], "_cost": cost}
+                    "mem_at_serve": mem_at_serve, "repair_calls": meta["repair_calls"],
+                    "num_turns": meta.get("num_turns", 0), "_cost": cost}
 
         c0, _ = cum_cost()
         partials = llm.pmap(serve_one, list(enumerate(stream)), args.deploy_workers)
@@ -874,7 +919,7 @@ def main():
                 "idx": p["idx"], "phase": phase, "id": p["id"], "em": p["em"], "f1": p["f1"],
                 "sub_em": p["sub_em"], "pred": p["pred"], "n_bullets": p["mem_at_serve"],
                 "n_episodes": 0, "max_uses": 0, "max_helpful": 0, "n_active_skills": 0,
-                "repair_calls": p["repair_calls"],
+                "repair_calls": p["repair_calls"], "num_turns": p["num_turns"],
                 "cum_cost_usd": round(run, 6), "cum_output_tokens": 0,
             })
         sys.stderr.write("[%s seed%d] SERVING acquire done: %d served, final store=%d bullets, "
@@ -942,7 +987,8 @@ def main():
                     "max_uses": max((b.get("uses", 0) for b in bullets), default=0),
                     "max_helpful": max((b.get("helpful", 0) for b in bullets), default=0),
                     "n_active_skills": sum(1 for v in skill_state.values() if v.get("status") == "active"),
-                    "repair_calls": meta["repair_calls"], "cum_cost_usd": round(run, 6),
+                    "repair_calls": meta["repair_calls"], "num_turns": meta.get("num_turns", 0),
+                    "cum_cost_usd": round(run, 6),
                     "cum_output_tokens": 0,
                 })
             last = chunk[-1][0] + 1

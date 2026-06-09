@@ -281,6 +281,46 @@ single run: set `induce_every` to a non-divisor of `train_n`, e.g. 17 not 16 —
   the tier-1→tier-2 promotion gate, NOT the memory distiller. (Naming caveat: ACE's "consolidation" =
   compress memory; OUR `consolidate()` = gated skill formation.)
 
+**Session 20 cont. — FIRST e2e native frozen run (arc_boundary_t1) → a structural finding → REDESIGN the gate
+to POOLED same-data (user), + num_turns instrumentation.** Ran the Tier-1 boundary (no_memory + ours_full,
+`--protocol frozen --train_n 16 --verify_n 8 --test_n 12 --induce_every 16 --memory_mode native
+--skill_tools "Skill,Read,Write,Edit,Bash" --skill_turns 8 --batch_size 8`, 1 seed, haiku, $3.7 total).
+- **Result (null + diagnostic):** no_memory test EM **0.667** (8/12), ours_full **0.667** (F1 0.985 vs 0.958,
+  $2.75 vs $0.93, 5 bullets, **0 skills**). EM identical; memory nudged only F1; 1 seed n=12 → noisy.
+- **⚠️ STRUCTURAL FINDING — the session-20 cluster gate cannot fire under native mode.** `induce_clustered`
+  clusters episodes by failure `signature` (`if sig:` skips empties), but the signature is ONLY populated by
+  the harness REPAIR loop (`ev["_repair_signatures"]`), which `--memory_mode native` BYPASSES (native
+  self-correction, repair_calls=0). Confirmed in the data: 16 episodes, 5 failed, **every failure signature
+  empty** → 0 clusters → 0 candidates. So under the deploy-faithful native headline (and ARC's Type-2 blind
+  reffree signal, which wouldn't give a meaningful failure key even WITH repair), the skill tier was
+  structurally untestable — independent of n. (The double-consolidation guard was in place + correct but not
+  stress-tested: consolidate found no candidates, so no real double-induce to suppress.)
+- **REDESIGN (user-driven) — POOLED, SAME-DATA gate replaces the cluster-scoped held-out gate.** Per the user:
+  *don't keep a held-out A/B; show Claude ALL un-consolidated memory and let IT decide which lessons to package
+  into skills; then A/B on that SAME data — the agent deterministically LOADS the pool memory, and the lone
+  variable is whether it ALSO loads the candidate skill.* Rationale: attacks the QUANTITY problem head-on
+  (no `>=4 same-signature` threshold, no data spent on a held-out half) instead of working around it.
+  `prequential.consolidate()` rewritten (`prequential.py:~408`): `pool` = all active distilled bullets →
+  `induce.induce(pool, focus_failures=False)` (Claude decides over the whole pool — the existing whole-pool
+  inducer, determinism-rule-safe: reads, never rewrites, gate decides) → gate set = every distinct episode's
+  task (NO held-out) → new `_gate_solve(task, mem_text)` runs a CONTROLLED deterministic-injection solve (the
+  pool memory in the prompt, NO native catalog, but Bash-enabled so a procedure skill can execute) → accept iff
+  `(full−base) ≥ margin ∧ broke ≤ rescued`, no power floor. Design choices flagged for the user: (a) `base`
+  loads the distilled BULLETS (a lessons list), NOT raw task→answer exemplars, so re-solving a source task with
+  the pool loaded is non-trivial (else base ≈ trivially-pass and the +skill A/B has no room); (b) the gate is
+  controlled-injection by design (the actual TEST inference stays native) — same stance as the original
+  session-20 gate; (c) cost: the gate is now `(#episode tasks) × 2 × (#candidates)` controlled solves (≈32 at
+  n=16), a real bump, parallelized at deploy_workers. The frozen TEST split stays the out-of-sample referee.
+  `induce_clustered` kept in induce.py for reference (no longer called by the experiment).
+- **num_turns instrumentation:** `llm.call_claude(..., return_meta=True)` now also returns the session's actual
+  `num_turns` (the JSON already carried it; we were dropping it); `native_solve` surfaces it and all four task-
+  row builders log `num_turns`. So no_memory vs ours_full agent-turn parity is now MEASURABLE per task (the cap
+  `--skill_turns` was already global/identical across arms; this measures actual self-paced turns; extra turns'
+  cost was already in the ledger). The arc_boundary_t1 run PREDATES this (old code) → re-run needed for turns.
+- **Status:** code compiles; arc env 38/38 green; NOT yet billed-run with the pooled gate. NEXT: re-run on a
+  FOCUSED `group_by_shape` split (the session-16 regime where a transferable procedure exists and memory gave
+  +0.50) on the new code, so the pooled gate, the guard, and num_turns all get exercised at once.
+
 ### 2026-06-08  (session 19 — make eval台 == real deploy: BOTH memory AND skill retrieval go through Claude Code's NATIVE mechanism (discoverable .claude/skills, agent selects/invokes); mechanism go/no-go PASS for ~$0.01)
 The user asked to align the eval harness with REAL deployment: memory and skill should BOTH be selected
 via Claude Code's native skill mechanism (description-gated catalog, agent invokes, body lazy-loaded),
