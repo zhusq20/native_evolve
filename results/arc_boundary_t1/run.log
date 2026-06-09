@@ -1,0 +1,40 @@
+[no_memory seed0] FROZEN after 0 acquire tasks; deploying on 12 held-out test (deploy_workers=8)...
+[no_memory seed0 test]   5/12 em=1 f1=1.00 rep=0 $0.0307
+[no_memory seed0 test]   1/12 em=1 f1=1.00 rep=0 $0.0387
+[no_memory seed0 test]   8/12 em=1 f1=1.00 rep=0 $0.0431
+[no_memory seed0 test]   2/12 em=1 f1=1.00 rep=0 $0.0533
+[no_memory seed0 test]   6/12 em=1 f1=1.00 rep=0 $0.0606
+[no_memory seed0 test]   9/12 em=1 f1=1.00 rep=0 $0.0450
+[no_memory seed0 test]  11/12 em=1 f1=1.00 rep=0 $0.0379
+[no_memory seed0 test]   7/12 em=0 f1=0.94 rep=0 $0.0891
+[no_memory seed0 test]   4/12 em=1 f1=1.00 rep=0 $0.1099
+[no_memory seed0 test]  10/12 em=0 f1=0.96 rep=0 $0.1103
+[no_memory seed0 test]   3/12 em=0 f1=0.79 rep=0 $0.1492
+[no_memory seed0 test]  12/12 em=0 f1=0.81 rep=0 $0.1599
+DONE no_memory seed0 [frozen]: EM=0.667 F1=0.958 cum=$0.9276 -> results/arc_boundary_t1/runs/no_memory_seed0/tasks.jsonl
+[ours_full seed0 acquire/B=8] 8/16 done (mem snapshot=0 bullets)
+[ours_full seed0 acquire/B=8] 16/16 done (mem snapshot=2 bullets)
+[ours_full seed0] FROZEN after 16 acquire tasks; deploying on 12 held-out test (deploy_workers=8)...
+[ours_full seed0 test]   5/12 em=1 f1=1.00 rep=0 $0.0301
+[ours_full seed0 test]   1/12 em=1 f1=1.00 rep=0 $0.0336
+[ours_full seed0 test]   6/12 em=1 f1=1.00 rep=0 $0.0434
+[ours_full seed0 test]   9/12 em=1 f1=1.00 rep=0 $0.0556
+[ours_full seed0 test]   8/12 em=1 f1=1.00 rep=0 $0.0585
+[ours_full seed0 test]  11/12 em=1 f1=1.00 rep=0 $0.0462
+[ours_full seed0 test]  10/12 em=0 f1=0.96 rep=0 $0.0674
+[ours_full seed0 test]   7/12 em=0 f1=0.95 rep=0 $0.0828
+[ours_full seed0 test]   2/12 em=1 f1=1.00 rep=0 $0.0859
+[ours_full seed0 test]   3/12 em=1 f1=1.00 rep=0 $0.1005
+[ours_full seed0 test]   4/12 em=0 f1=0.95 rep=0 $0.1387
+[ours_full seed0 test]  12/12 em=0 f1=0.96 rep=0 $0.2669
+DONE ours_full seed0 [frozen]: EM=0.667 F1=0.985 cum=$2.7466 -> results/arc_boundary_t1/runs/ours_full_seed0/tasks.jsonl
+concurrency: workers=1 runs x deploy_workers=8 => peak ~8 concurrent claude requests
+
+==================== PHASE-0 SUMMARY ====================
+protocol=frozen  train=16 val=8 test=12(headline)  methods=['no_memory', 'ours_full']  seeds=[0]
+method         testEM       F1   1stHalf   2ndHalf   cost_usd  bullets
+no_memory       0.667    0.958     0.833     0.500     0.9276      0.0
+ours_full       0.667    0.985     0.833     0.500     2.7466      5.0
+curve -> results/arc_boundary_t1/curve.csv
+========================================================
+

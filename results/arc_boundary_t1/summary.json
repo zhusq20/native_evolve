@@ -1,0 +1,18 @@
+{
+  "no_memory": {
+    "final_preq_em": 0.6667,
+    "final_preq_f1": 0.9584,
+    "first_half_em": 0.8333,
+    "second_half_em": 0.5,
+    "total_cost_usd": 0.9276,
+    "final_bullets": 0.0
+  },
+  "ours_full": {
+    "final_preq_em": 0.6667,
+    "final_preq_f1": 0.9849,
+    "first_half_em": 0.8333,
+    "second_half_em": 0.5,
+    "total_cost_usd": 2.7466,
+    "final_bullets": 5.0
+  }
+}
