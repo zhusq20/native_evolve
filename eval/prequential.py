@@ -204,6 +204,14 @@ def main():
                          "(e.g. instruction_type for SB, type for HotpotQA). '' = plain shuffle.")
     ap.add_argument("--induce_every", type=int, default=16,
                     help="ours_full: run gated skill consolidation every K tasks (0=off)")
+    ap.add_argument("--cluster_min", type=int, default=4,
+                    help="cluster gate: min episodes sharing a failure signature before that cluster is "
+                         "inducible (needs both a train half to write the skill and a gate half to test).")
+    ap.add_argument("--cluster_gate_margin", type=int, default=1,
+                    help="cluster gate: required (with-skill minus without-skill) passes on the cluster's "
+                         "held-out GATE half to ACTIVATE the skill (default 1 = any within-cluster lift), "
+                         "combined with a non-dilution guard (broke <= rescued). No power floor: clusters "
+                         "are small by design and the test split remains the honest generalization referee.")
     ap.add_argument("--gate_min_n", type=int, default=18,
                     help="rolling consolidation gate: min CUMULATIVE A/B val tasks (across "
                          "checkpoints) before a skill set may activate (power floor).")
@@ -346,6 +354,9 @@ def main():
                             [n for n, _ in NATIVE_SKILLS] or "(none)"))
 
     all_tasks = env.load_tasks(args.tasks)
+    # id -> full task (with gold), so the cluster gate can re-solve a gate-half EPISODE's task and
+    # judge it (episodes store only the question; gold lives on the task). Covers every split.
+    task_by_id = {t["id"]: t for t in all_tasks}
     # SkillOpt-style disjoint splits: train (rollout evidence the method learns on), val/selection
     # (verify_tasks: accept/reject the skill-edit gate), test (frozen held-out headline). Optionally
     # stratified so each split keeps the task-family mix.
@@ -384,148 +395,63 @@ def main():
     def retrieve_distilled(q):
         """Distilled-memory retrieval, selectable via --retrieval. agentic = native paradigm
         (model selects from the index); lexical = bag-of-words top-k. Returns (block, ids).
-        Used by BOTH inject() and the gate's base_block so the gate A/B compares like with like."""
+        Used by inject() at inference (the cluster gate builds its own base from train-half samples)."""
         if args.retrieval == "agentic":
             return retrieve.select_and_block_agentic(q)
         return retrieve.select_and_block(q)
 
-    def base_block(t):
-        """Episodic + distilled injection — the episodic-first baseline the gate must beat."""
-        epi = episodic.exemplar_block(t["question"])
-        dis, _ = retrieve_distilled(t["question"])
-        return "\n\n".join(x for x in (epi, dis) if x)
-
-    def consolidate_native(idx, cands):
-        """NATIVE gate: judge a candidate by PRESENCE in the discoverable catalog, not by injected
-        text. base arm = native_solve with the current catalog (episodic+distilled+active skills);
-        full arm = same catalog + the candidate skills as discoverable. The agent decides whether to
-        invoke the candidate — so the gate also tests 'is the candidate's description good enough to be
-        picked', exactly as deployment would. Reuses gate_tally / signal_agreement / rolling_decision
-        (identical accept rule + rolling state as the text-injection gate)."""
-        cand_pairs = [(c["name"], c["md"]) for c in cands]
-        audit = getattr(args, "gate_audit", False)
-        if audit:
-            judges = {"oracle": make_judge("oracle", env, self_verify_mod.self_verify),
-                      "reffree": make_judge("reffree", env, self_verify_mod.self_verify)}
-        else:
-            judges = {"live": make_judge(args.gate_signal, env, self_verify_mod.self_verify)}
-
-        def _pair(t):
-            # solve base & full ONCE each, score with every judge on the IDENTICAL answers
-            rb = native_solve(t, "", extra_skills=None, want_cost=True)[0]
-            rf = native_solve(t, "", extra_skills=cand_pairs, want_cost=True)[0]
-            row = {}
-            for nm, j in judges.items():
-                try: row[nm + "_base"] = int(bool(j(t, rb)))
-                except Exception: row[nm + "_base"] = 0
-                try: row[nm + "_full"] = int(bool(j(t, rf)))
-                except Exception: row[nm + "_full"] = 0
-            return row
-        rows = llm.pmap(_pair, verify_tasks, args.deploy_workers)
-
-        if audit:
-            t_or = verify.gate_tally(rows, "oracle", min_n=args.gate_min_n, margin=args.gate_margin)
-            t_rf = verify.gate_tally(rows, "reffree", min_n=args.gate_min_n, margin=args.gate_margin)
-            sig = verify.signal_agreement(rows, "oracle", "reffree")
-            agree = (t_or["activate"] == t_rf["activate"])
-            audit_obj = {"idx": idx, "candidates": [c["name"] for c in cands], "mode": "native",
-                         "oracle": t_or, "reffree": t_rf, "agree": agree,
-                         "signal_agreement": sig, "live_signal": args.gate_signal}
-            try:
-                (home / "memory" / "gate_audit.json").write_text(json.dumps(audit_obj, indent=2),
-                                                                 encoding="utf-8")
-            except Exception as exc:
-                sys.stderr.write("gate_audit write error: %s\n" % exc)
-            activate = (t_rf if args.gate_signal == "reffree" else t_or)["activate"]
-            for c in cands:
-                induce.write_skill(c, status=("active" if activate else "candidate"))
-            sys.stderr.write(
-                "[gate_audit native @%d] %d cand(s) | ORACLE rescued=%d broke=%d act=%s | "
-                "REFFREE rescued=%d broke=%d act=%s | AGREE=%s | base_fail_agree=%.2f (gold_fail=%d) | live=%s\n"
-                % (idx, len(cands), t_or["rescued"], t_or["broke"], t_or["activate"],
-                   t_rf["rescued"], t_rf["broke"], t_rf["activate"], agree,
-                   sig["base_fail_agree"], sig["n_base_fail"], args.gate_signal))
-            return
-
-        prod_rows = [{"base_em": r["live_base"], "full_em": r["live_full"]} for r in rows]
-        bp, fp, vn, activate, info = verify.rolling_decision(
-            prod_rows, str(home / "memory" / "gate_window.json"),
-            min_n=args.gate_min_n, margin=args.gate_margin)
-        for c in cands:
-            induce.write_skill(c, status=("active" if activate else "candidate"))
-        sys.stderr.write("[consolidate native @%d] rolling gate (%s): cum base %d -> +skills %d (n=%d, "
-                         "rescued=%d broke=%d sat=%s) => %s\n"
-                         % (idx, args.gate_signal, bp, fp, vn, info["rescued"], info["broke"],
-                            info["decision"]["saturated"],
-                            ("ACTIVATE %d skills" % len(cands)) if activate
-                            else "REJECT/candidate (degrade)"))
-
+    _consolidated_idx = set()      # task indices already consolidated -> skip a redundant repeat. The
+                                   # end-of-acquire FINAL consolidate (:~987) lands on the SAME last index a
+                                   # PERIODIC one already hit whenever train_n % induce_every == 0 (identical
+                                   # episode set -> identical induce+gate, pure waste + near-dup skills).
+                                   # Distinct periodic idxs never collide, so this only suppresses the repeat.
     def consolidate(idx):
-        """Non-destructive, GATED consolidation: induce skills from memory, activate them ONLY
-        if they lift held-out accuracy over the episodic+distilled baseline; else keep them as
-        candidates so ours_full degrades gracefully to episodic+distilled (never below)."""
-        cands = induce.induce(focus_failures=True)
+        """GATED consolidation, CLUSTER-SCOPED (within failure mode). For each failure `signature` with
+        enough episodes, induce ONE skill from that cluster's TRAIN half, then ACTIVATE it iff it lifts
+        pass-rate on the cluster's held-out GATE half. The A/B is a CONTROLLED skill-text injection —
+        read / don't-read THIS skill — over a FIXED base = the train-half samples it was distilled from
+        (NOT the eval-time retrieval, NOT the native catalog), so the lone variable between arms is the
+        skill. No cross-task generalization is required (only within-cluster lift); the frozen test split
+        stays the honest generalization referee. Each cluster decides independently, so a skill that
+        fails its own gate degrades to a candidate (ours_full never drops below episodic+distilled)."""
+        if idx in _consolidated_idx:                 # already consolidated at this index (see _consolidated_idx)
+            return
+        _consolidated_idx.add(idx)
+        cands = induce.induce_clustered(min_cluster=args.cluster_min)
         if not cands:
             return
-        if args.memory_mode == "native":
-            return consolidate_native(idx, cands)
-        # NO train/inference MISMATCH (skill presentation): show CANDIDATE skills to the gate EXACTLY
-        # as inference shows ACTIVE skills — same render_skills_block (top-k by relevance, compacted,
-        # same header), appended AFTER the episodic+distilled base (skill LAST), per inject() order.
-        cand_skills = [{"name": c["name"], "md": c["md"], "value": 0} for c in cands]
-        skill_block_fn = lambda t: retrieve.render_skills_block(cand_skills, t["question"], k=3)
-        # NO train/inference MISMATCH (solve path): judge the A/B via the harness's REAL serve path
-        # (single-shot + repair, or agentic) so a skill is rated on the answer it will ACTUALLY face
-        # at inference, not a bare single-shot. (For repair_turns=0 this is identical cost to before.)
-        gate_solve = lambda task, mem: solve(task, mem, want_cost=True)[0]
-        # GATE SIGNAL (A1): reffree = deploy-faithful self_verify A/B (no gold); oracle = GOLD env.score.
-        if getattr(args, "gate_audit", False):
-            # PRECISION-LAW-FOR-GATING audit: solve the val A/B ONCE, score with BOTH judges on the
-            # IDENTICAL answers (clean isolation of the gate SIGNAL — re-solving per judge would
-            # re-introduce claude noise). The live decision follows --gate_signal, derived from the
-            # SAME rows (no double-solve).
-            judges = {"oracle": make_judge("oracle", env, self_verify_mod.self_verify),
-                      "reffree": make_judge("reffree", env, self_verify_mod.self_verify)}
-            rows = verify.paired_ab_multi(skill_block_fn, base_block, verify_tasks, env, judges,
-                                          workers=args.deploy_workers, solve_fn=gate_solve)
-            t_or = verify.gate_tally(rows, "oracle", min_n=args.gate_min_n, margin=args.gate_margin)
-            t_rf = verify.gate_tally(rows, "reffree", min_n=args.gate_min_n, margin=args.gate_margin)
-            sig = verify.signal_agreement(rows, "oracle", "reffree")
-            agree = (t_or["activate"] == t_rf["activate"])
-            audit = {"idx": idx, "candidates": [c["name"] for c in cands],
-                     "oracle": t_or, "reffree": t_rf, "agree": agree,
-                     "signal_agreement": sig, "live_signal": args.gate_signal}
-            try:
-                (home / "memory" / "gate_audit.json").write_text(json.dumps(audit, indent=2),
-                                                                 encoding="utf-8")
-            except Exception as exc:
-                sys.stderr.write("gate_audit write error: %s\n" % exc)
-            activate = (t_rf if args.gate_signal == "reffree" else t_or)["activate"]
-            for c in cands:
-                induce.write_skill(c, status=("active" if activate else "candidate"))
-            sys.stderr.write(
-                "[gate_audit @%d] %d cand(s) | ORACLE rescued=%d broke=%d (full-base=%d) act=%s | "
-                "REFFREE rescued=%d broke=%d (full-base=%d) act=%s | AGREE=%s | "
-                "signal base_agree=%.2f base_fail_agree=%.2f (gold_fail=%d) | live=%s\n"
-                % (idx, len(cands),
-                   t_or["rescued"], t_or["broke"], t_or["full_pass"] - t_or["base_pass"], t_or["activate"],
-                   t_rf["rescued"], t_rf["broke"], t_rf["full_pass"] - t_rf["base_pass"], t_rf["activate"],
-                   agree, sig["base_agree"], sig["base_fail_agree"], sig["n_base_fail"], args.gate_signal))
-            return
         gate_judge = make_judge(args.gate_signal, env, self_verify_mod.self_verify)
-        bp, fp, vn, activate, info = verify.rolling_gate(
-            skill_block_fn, base_block, verify_tasks, env,
-            state_path=str(home / "memory" / "gate_window.json"),
-            workers=args.deploy_workers, min_n=args.gate_min_n, margin=args.gate_margin,
-            judge=gate_judge, solve_fn=gate_solve)
         for c in cands:
+            # base = the TRAIN-half successes this skill was summarized from, rendered as worked
+            # examples and held FIXED across both arms (controlled: the skill text is the lone variable).
+            base = episodic.exemplar_block_from([e for e in c["train_eps"] if e.get("passed")])
+            skill_text = retrieve.render_skills_block(
+                [{"name": c["name"], "md": c["md"], "value": 0}], "", k=1)
+            full = "\n\n".join(x for x in (base, skill_text) if x)        # base THEN skill (inject order)
+
+            def _pair(ep):
+                task = task_by_id.get(ep.get("id"))
+                if task is None:
+                    return None                                          # no gold for this id -> skip
+                rb = solve(task, base, want_cost=True)[0]                 # WITHOUT this skill
+                rf = solve(task, full, want_cost=True)[0]                 # READING this skill
+                return {"base_em": int(bool(gate_judge(task, rb))),
+                        "full_em": int(bool(gate_judge(task, rf)))}
+            rows = [r for r in llm.pmap(_pair, c["gate_eps"], args.deploy_workers) if r]
+
+            bp = sum(r["base_em"] for r in rows)
+            fp = sum(r["full_em"] for r in rows)
+            rescued = sum(1 for r in rows if r["base_em"] == 0 and r["full_em"] == 1)
+            broke = sum(1 for r in rows if r["base_em"] == 1 and r["full_em"] == 0)
+            # within-cluster accept: any lift past the margin, non-diluting. NO power floor (clusters
+            # are small by design); the test split measures whether these cluster-local skills generalize.
+            activate = bool(rows and (fp - bp) >= args.cluster_gate_margin and broke <= rescued)
             induce.write_skill(c, status=("active" if activate else "candidate"))
-        sys.stderr.write("[consolidate @%d] rolling gate (%s): cum base %d -> +skills %d (n=%d, "
-                         "rescued=%d broke=%d sat=%s) => %s\n"
-                         % (idx, args.gate_signal, bp, fp, vn, info["rescued"], info["broke"],
-                            info["decision"]["saturated"],
-                            ("ACTIVATE %d skills" % len(cands)) if activate
-                            else "REJECT/candidate (degrade)"))
+            sys.stderr.write(
+                "[consolidate cluster @%d] sig=%s skill=%s gate_n=%d base=%d -> +skill=%d "
+                "(rescued=%d broke=%d) => %s\n"
+                % (idx, c.get("signature", "?"), c["name"], len(rows), bp, fp, rescued, broke,
+                   "ACTIVATE" if activate else "candidate (degrade)"))
 
     LEARN_METHODS = ("episodic", "ours_mem", "ours_full", "ace")
     OURS_METHODS = ("episodic", "ours_mem", "ours_full")

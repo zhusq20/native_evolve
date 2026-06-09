@@ -64,9 +64,13 @@ def retrieve(query, k=2, successes_only=True):
     return [e for e in scored if len(_tokens(e.get("question", "")) & q) > 0][:k]
 
 
-def exemplar_block(query, k=2, max_solution_chars=1100, max_q_chars=400):
-    """Inject up to k similar past SUCCESSES as worked examples (empty if none)."""
-    eps = retrieve(query, k)
+def exemplar_block_from(eps, max_solution_chars=1100, max_q_chars=400):
+    """Render an EXPLICIT list of episodes as worked examples (no retrieval step).
+
+    Factored out of exemplar_block so the cluster promotion gate can build its A/B base from
+    the EXACT train-half samples a skill was distilled from — not whatever the eval-time
+    retriever would surface — keeping the only with/without difference the skill text itself.
+    """
     if not eps:
         return ""
     parts = []
@@ -76,6 +80,11 @@ def exemplar_block(query, k=2, max_solution_chars=1100, max_q_chars=400):
                      % ((e.get("question", "") or "")[:max_q_chars], sol))
     return ("Worked examples retrieved from your past successes — adapt the approach to the "
             "current task (do not copy blindly):\n\n" + "\n\n".join(parts))
+
+
+def exemplar_block(query, k=2, max_solution_chars=1100, max_q_chars=400):
+    """Inject up to k similar past SUCCESSES as worked examples (empty if none)."""
+    return exemplar_block_from(retrieve(query, k), max_solution_chars, max_q_chars)
 
 
 def retrieve_by_signature(query, signature, k=2):

@@ -226,6 +226,61 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-09  (session 20 — REWORK the promotion gate: CLUSTER-SCOPED within-failure-mode A/B, replacing the global val-split gate)
+**Decision (user-driven design):** the promotion gate no longer asks "does this skill generalize to a
+held-out val split". It asks the narrower, higher-power question **"within the failure-mode cluster the
+skill was induced from, does reading the skill beat not reading it on instance-disjoint gate samples?"**
+Rationale: the global val split was both off-distribution (skill rarely fires) and underpowered; testing
+on the cluster's OWN samples (instance-disjoint, same signature) gives relevance + power without the
+leakage of testing on the exact tasks that wrote the skill. We do NOT require cross-task generalization
+— the **frozen test split stays the honest generalization referee**; the gate is just a promotion
+heuristic. (This deliberately makes the GATE controlled-injection again, NOT the session-19 native
+discovery — inference stays native; only the gate's measurement is controlled.)
+
+**Mechanism (replaces, not adds — per user):**
+- `induce.induce_clustered(min_cluster=4)` — cluster raw EPISODES by failure `signature`, deterministic
+  id-sorted split into train/gate halves, induce ONE skill per cluster **from the TRAIN half only**
+  (verified: gate episodes never enter the inducer prompt → no leakage). Returns
+  `{name,md,skill,signature,train_eps,gate_eps}`. Clusters too small to fill both halves are skipped.
+- `prequential.consolidate(idx)` rewritten: per cluster, A/B = `solve(task, base)` vs
+  `solve(task, base+skill)` on the **gate half**, where `base` = the train-half successes rendered as
+  worked examples (`episodic.exemplar_block_from`), held FIXED across both arms (skill text = lone
+  variable). Judge = `make_judge(--gate_signal)` (oracle gold by default; gold looked up via new
+  `task_by_id` over all_tasks since episodes store only the question). **Accept rule:**
+  `(with−without) ≥ --cluster_gate_margin` (default 1) ∧ `broke ≤ rescued`, **no power floor** (clusters
+  are small by design). Each cluster decides independently → a skill that fails its own gate degrades to
+  a candidate (ours_full never below episodic+distilled).
+- Removed: the old global-val gate body, `consolidate_native`, and the now-dead `base_block`. New flags
+  `--cluster_min`, `--cluster_gate_margin`. `--gate_min_n/--gate_margin/--gate_audit/--memory_mode`
+  no longer touch the gate (memory_mode still drives native inference).
+
+**Status:** code + AST + unit smoke (split arithmetic, no-leakage, empty-safe) PASS. **NOT yet run
+end-to-end** — next: an ARC `--protocol frozen` run to confirm the cluster gate fires and activates
+skills, then compare forward-stream/test EM vs the old global-gate runs.
+
+**Session 20 cont. — kill the DOUBLE consolidation + clarify the two-tier write boundary (user Q).**
+Tracing the frozen acquire→freeze flow with the user surfaced that `consolidate()` was being run TWICE
+back-to-back on the identical episode set whenever `train_n % induce_every == 0`: the PERIODIC trigger
+(`run_phase:~796` / `batched_learn:~946`, fires when `(idx+1) % induce_every == 0`) lands on the LAST
+acquire task `idx=train_n-1`, and then the end-of-acquire FINAL trigger (`prequential.py:~987`, there to
+capture tail episodes recorded after the last periodic fire before freezing) re-runs `consolidate(train_n-1)`
+on the same `episodic.load()` → identical induce + gate A/B = pure claude waste, and a source of the
+near-duplicate-named skills noted in session 16. **Fix:** a closure-level `_consolidated_idx` set + an
+early-return guard at the top of `consolidate()` (`prequential.py:403-419`) — each task index consolidates
+at most once. Distinct periodic idxs never collide, so only the redundant repeat is suppressed; the FINAL
+trigger still runs (and catches tail episodes) whenever `train_n` is NOT a multiple of `induce_every`
+(the common case, e.g. the smoke's `induce_every=12 > train_n=8`); `--induce_every 0` skill-OFF is
+untouched (never calls consolidate). Compiles; arc env 38/38 green. (Alternative non-code workaround for a
+single run: set `induce_every` to a non-divisor of `train_n`, e.g. 17 not 16 — no longer needed.)
+- **Clarified the WRITE boundary (the user's "does memory summarization live in consolidate?" question):**
+  NO. Two tiers, two writers. **Tier-1 memory (摘要)** = distilled bullets via `reflect`→`curate.merge` +
+  raw exemplars via `episodic.record`, written PER TASK in the learning step (`batched_learn` calls
+  `reflect.run(..., promote_skills=False)`). **Tier-2 skill** = `consolidate()` ONLY: it reads already-
+  accumulated EPISODES, clusters by failure signature, induces a skill, gates it (within-cluster A/B), and
+  `induce.write_skill`s it. `consolidate()`'s body makes zero `curate.merge`/episode writes — it is purely
+  the tier-1→tier-2 promotion gate, NOT the memory distiller. (Naming caveat: ACE's "consolidation" =
+  compress memory; OUR `consolidate()` = gated skill formation.)
+
 ### 2026-06-08  (session 19 — make eval台 == real deploy: BOTH memory AND skill retrieval go through Claude Code's NATIVE mechanism (discoverable .claude/skills, agent selects/invokes); mechanism go/no-go PASS for ~$0.01)
 The user asked to align the eval harness with REAL deployment: memory and skill should BOTH be selected
 via Claude Code's native skill mechanism (description-gated catalog, agent invokes, body lazy-loaded),

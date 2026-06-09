@@ -10,7 +10,7 @@ held-out tasks), not by retrieval frequency — see verify.counterfactual_gate.
 """
 import re
 
-from . import config, llm, store
+from . import config, episodic, llm, store
 
 
 def _slug(text):
@@ -90,6 +90,58 @@ def induce(model_items=None, focus_failures=True):
             continue
         md, name = render_skill_md(sk)
         out.append({"name": name, "md": md, "skill": sk})
+    return out
+
+
+def _episode_digest(eps, max_items=40, max_q=600, max_sol=800):
+    """Render a cluster's TRAIN episodes (raw task -> outcome -> solution) as the inducer's input.
+    Shows both FIXED and FAILED traces so the inducer can package the pitfall AND its fix."""
+    lines = []
+    for e in eps[:max_items]:
+        tag = "FIXED" if e.get("passed") else "FAILED"
+        lines.append("[%s | sig=%s] Task: %s\nSolution:\n%s"
+                     % (tag, e.get("signature", ""), (e.get("question", "") or "").strip()[:max_q],
+                        (e.get("solution", "") or "").strip()[:max_sol]))
+    return "\n\n".join(lines)
+
+
+def induce_clustered(min_cluster=4, gate_min=2):
+    """Cluster raw EPISODES by failure `signature`, split each cluster TRAIN/GATE (deterministic by
+    id), and induce one skill per cluster from the TRAIN half ONLY. Returns a list of
+    {"name","md","skill","signature","train_eps","gate_eps"} — the caller gates each skill on its own
+    held-out GATE half (within-cluster A/B), so the gate set is same-failure-mode but instance-disjoint
+    from what wrote the skill (no leakage). gate_eps NEVER enters the inducer prompt.
+
+    A cluster is skipped (no candidate) when it cannot supply both halves: fewer than `min_cluster`
+    episodes, or fewer than `gate_min` on the gate side — honest: no held-out evidence, no promotion.
+    """
+    eps = episodic.load()
+    bysig = {}
+    for e in eps:
+        sig = e.get("signature") or ""
+        if sig:                                   # signature == "" -> clean first pass, no failure mode
+            bysig.setdefault(sig, []).append(e)
+    template = (config.PROMPTS_DIR / "skill_inducer.md").read_text(encoding="utf-8")
+    out = []
+    for sig, group in sorted(bysig.items()):
+        group = sorted(group, key=lambda e: str(e.get("id", "")))   # deterministic split (no RNG)
+        if len(group) < min_cluster:
+            continue
+        cut = len(group) // 2
+        train_eps, gate_eps = group[:cut], group[cut:]
+        if not train_eps or len(gate_eps) < gate_min:
+            continue
+        raw = llm.call_claude(
+            template + "\n\n=== FAILURE-MODE SAMPLES (signature=%s) ===\n" % sig
+            + _episode_digest(train_eps), allowed_tools="Read")
+        obj = llm.extract_json(raw) or {}
+        skills = obj.get("skills", []) if isinstance(obj, dict) else []
+        for sk in skills:
+            if not isinstance(sk, dict):
+                continue
+            md, name = render_skill_md(sk)
+            out.append({"name": name, "md": md, "skill": sk, "signature": sig,
+                        "train_eps": train_eps, "gate_eps": gate_eps})
     return out
 
 
