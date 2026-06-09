@@ -143,13 +143,34 @@ def reffree_ok(self_verify_fn, task, resp, env):
     return None if vr is None else bool(vr.get("ok"))
 
 
+def cv_verdict(env, task, resp):
+    """Demo-CV verdict {ok, signature, feedback} from the env's HELD-OUT-demo execution check
+    (env.cv_check on task["cv_demos"], populated by --demo_holdout), or None when UNAVAILABLE
+    (env has no cv_check / task wasn't split / no code to run). Reads NO gold: cv demos are
+    task-input data the harness withheld from the prompt — the engineered type-1 proxy that turns
+    'consistent with shown demos' (type-2, blind) into a generalization estimate (precision law)."""
+    fn = getattr(env, "cv_check", None)
+    if fn is None or not task.get("cv_demos"):
+        return None
+    try:
+        ok, fb = fn(task, resp)
+    except Exception:
+        return None
+    if ok is None:
+        return None
+    return {"ok": bool(ok), "signature": "" if ok else "demo_cv_fail", "feedback": fb or ""}
+
+
 def make_judge(signal, env, self_verify_fn):
     """Build the gate's judge(task, resp) -> bool. signal='oracle' -> GOLD (env.score em == 1.0; the
     measurement ceiling, NOT deploy-available). signal='reffree' -> reference-free self_verify ok
-    (deploy-available, no gold); an UNAVAILABLE verdict counts as NOT-ok, so the rolling gate's
-    margin/non-dilution guard cannot activate a skill on a missing/noisy signal (precision law)."""
+    (deploy-available, no gold). signal='demo_cv' -> held-out-demo execution (cv_verdict; no gold,
+    needs --demo_holdout). For both no-gold signals an UNAVAILABLE verdict counts as NOT-ok, so the
+    gate's margin/non-dilution guard cannot activate a skill on a missing/noisy signal (precision law)."""
     if signal == "oracle":
         return lambda task, resp: env.score(task, resp).get("em") == 1.0
+    if signal == "demo_cv":
+        return lambda task, resp: bool((cv_verdict(env, task, resp) or {}).get("ok"))
     return lambda task, resp: bool(reffree_ok(self_verify_fn, task, resp, env))
 
 
@@ -274,20 +295,31 @@ def main():
                          "below baseline. self: route to ONE channel by code-block (exec for code, else "
                          "critique). self_exec: dataset-agnostic, EXECUTION ONLY (no critique). oracle: "
                          "per-env verify() (dataset-AWARE ceiling/back-compat; pass explicitly for the oracle map).")
-    ap.add_argument("--gate_signal", choices=["reffree", "oracle"], default="oracle",
+    ap.add_argument("--gate_signal", choices=["reffree", "oracle", "demo_cv"], default="oracle",
                     help="correctness signal the skill-promotion GATE's held-out A/B decides on. oracle "
                          "(DEFAULT, back-compat): GOLD env.score — the measurement ceiling, NOT available "
                          "in a real deployment. reffree (deploy-faithful): the reference-free self_verify "
-                         "the system would actually have at deploy (reads NO gold). Run both to measure the "
-                         "gap = precision-law-for-gating. See memory/native-design-law.md.")
-    ap.add_argument("--credit_signal", choices=["reffree", "oracle"], default="oracle",
+                         "the system would actually have at deploy (reads NO gold). demo_cv: held-out-demo "
+                         "execution (env.cv_check; needs --demo_holdout; no gold) — the ENGINEERED type-1 "
+                         "proxy. Run several to measure the gap = precision-law-for-gating.")
+    ap.add_argument("--credit_signal", choices=["reffree", "oracle", "demo_cv"], default="oracle",
                     help="correctness signal for episodic-success + distilled-bullet CREDIT. oracle "
                          "(DEFAULT): GOLD em. reffree: self_verify ok (deploy-available, no gold; costs "
-                         "+1 verify call per learned task on non-code tasks).")
-    ap.add_argument("--reflect_signal", choices=["reffree", "oracle"], default="oracle",
+                         "+1 verify call per learned task on non-code tasks). demo_cv: held-out-demo "
+                         "execution (no gold, no LLM cost; needs --demo_holdout).")
+    ap.add_argument("--reflect_signal", choices=["reffree", "oracle", "demo_cv"], default="oracle",
                     help="evidence the Reflector sees. oracle (DEFAULT): GOLD-grounded collect_evidence "
                          "(incl. the N3 semantic value-diff). reffree: reference-free evidence (self_verify "
-                         "verdict + repair trace, NO gold) — deploy-faithful; loses N3 (its honest cost).")
+                         "verdict + repair trace, NO gold) — deploy-faithful; loses N3 (its honest cost). "
+                         "demo_cv: same evidence shape, verdict from the held-out-demo check (which says "
+                         "WHY the inferred rule failed to generalize).")
+    ap.add_argument("--demo_holdout", type=int, default=0,
+                    help="hold out the LAST k demonstration pairs of each task from the prompt "
+                         "(-> task['cv_demos'], via env.apply_demo_holdout; question re-rendered so "
+                         "nothing leaks). They power the demo_cv signal: passing a WITHHELD demo is a "
+                         "GENERALIZATION estimate, not consistency — engineers type-2 -> type-1 with "
+                         "ZERO gold. Applied to ALL arms (identical solve context across signal arms). "
+                         "0 (default) = off.")
     ap.add_argument("--agentic", action="store_true",
                     help="agentic solve: the target runs MULTI-TURN with Read/Write/Bash/Skill in a "
                          "per-task gold-isolated sandbox (writes, RUNS, and repairs its own code) "
@@ -372,6 +404,15 @@ def main():
                             [n for n, _ in NATIVE_SKILLS] or "(none)"))
 
     all_tasks = env.load_tasks(args.tasks)
+    # Demo-CV split BEFORE anything reads the tasks (splits, retrieval, episodic all see fit-only).
+    if args.demo_holdout > 0:
+        if not hasattr(env, "apply_demo_holdout"):
+            raise SystemExit("--demo_holdout: env %r has no apply_demo_holdout (arc only for now)"
+                             % args.env)
+        n_split, n_kept = env.apply_demo_holdout(all_tasks, args.demo_holdout)
+        sys.stderr.write("[demo_holdout=%d] %d/%d tasks split (demo_cv signal available); "
+                         "%d kept whole (too few demos -> signal unavailable there)\n"
+                         % (args.demo_holdout, n_split, len(all_tasks), n_kept))
     # id -> full task (with gold), so the cluster gate can re-solve a gate-half EPISODE's task and
     # judge it (episodes store only the question; gold lives on the task). Covers every split.
     task_by_id = {t["id"]: t for t in all_tasks}
@@ -828,25 +869,41 @@ def main():
             mem = ""                                            # no_memory
         return mem, injected_ids
 
+    def _signal_verdict(kind, task, resp):
+        """Non-oracle verdict for signal `kind`: 'demo_cv' -> held-out-demo execution (cv_verdict,
+        zero LLM cost); 'reffree' -> self_verify. None when unavailable (caller degrades)."""
+        if kind == "demo_cv":
+            return cv_verdict(env, task, resp)
+        return reffree_verdict(self_verify_mod.self_verify, task, resp, env)
+
     def _learn_signals(task, resp, ev):
-        """(success_bool, reflect_evidence_str) for a learned task under --credit_signal/--reflect_signal.
-        reffree = deploy-available self_verify (NO gold; the system's own signal); oracle = GOLD
-        (env.score em / gold-grounded collect_evidence, incl. N3). The reference-free verdict is computed
-        AT MOST ONCE and reused for both the success flag (episode + credit, A2) and the reflection
-        evidence (A3). `success` is the credit signal; on a rare UNAVAILABLE reffree verdict it falls
-        back to gold so the episode still records a label."""
-        vr = None
-        if args.credit_signal == "reffree" or args.reflect_signal == "reffree":
-            vr = reffree_verdict(self_verify_mod.self_verify, task, resp, env)
-        if args.credit_signal == "oracle" or vr is None:
+        """(success_bool, reflect_evidence_str, signal_ok) for a learned task under
+        --credit_signal/--reflect_signal. Non-oracle verdicts ('reffree' self_verify / 'demo_cv'
+        held-out-demo execution — NO gold either way) are computed AT MOST ONCE per kind and shared
+        between the success flag (episode + credit, A2) and the reflection evidence (A3). `success`
+        falls back to gold on a rare UNAVAILABLE verdict so the episode still records a label.
+        `signal_ok` = the credit verdict's ok (None for oracle/unavailable), logged per task row so
+        signal-vs-gold AGREEMENT (the precision measurement) is computable offline from tasks.jsonl."""
+        cache = {}
+
+        def verd(kind):
+            if kind not in cache:
+                cache[kind] = _signal_verdict(kind, task, resp)
+            return cache[kind]
+
+        sig_ok = None
+        if args.credit_signal == "oracle":
             succ = (ev.get("em") == 1.0)
         else:
-            succ = bool(vr.get("ok"))
+            vr = verd(args.credit_signal)
+            sig_ok = None if vr is None else bool(vr.get("ok"))
+            succ = (ev.get("em") == 1.0) if vr is None else bool(vr.get("ok"))
         if args.reflect_signal == "oracle":
             evi = envs_pkg.render_evidence(envs_pkg.collect_evidence(env, task, resp, ev))
         else:
-            evi = envs_pkg.render_evidence(reffree_evidence_dict(task, resp, ev, vr))
-        return succ, evi
+            evi = envs_pkg.render_evidence(reffree_evidence_dict(task, resp, ev,
+                                                                 verd(args.reflect_signal)))
+        return succ, evi, sig_ok
 
     def process(task, idx, learn, phase):
         """One task: inject -> target call -> score. If learn, update memory (record/credit/reflect).
@@ -855,10 +912,11 @@ def main():
         mem_block, injected_ids = inject(task)
         resp, ev, meta = solve(task, mem_block)
 
+        sig_ok = None
         if learn:
-            # ONE reference-free verdict per learned task (deploy-available), reused for episode-success,
-            # credit (A2), and reflection evidence (A3). Computed only when a reffree signal is selected.
-            succ, evi = _learn_signals(task, resp, ev)
+            # ONE no-gold verdict per (kind, learned task), reused for episode-success, credit (A2),
+            # and reflection evidence (A3). Computed only when a non-oracle signal is selected.
+            succ, evi, sig_ok = _learn_signals(task, resp, ev)
             # record the RAW EPISODE (episodic-first methods): first-class, append-only
             if args.method in ("episodic", "ours_full"):
                 try:
@@ -897,6 +955,9 @@ def main():
             "num_turns": meta.get("num_turns", 0),
             "cum_cost_usd": round(cc, 6), "cum_output_tokens": ct,
         }
+        if sig_ok is not None:
+            # credit-signal verdict vs gold em -> per-arm signal precision/agreement, offline.
+            row["signal_ok"] = sig_ok
         sys.stderr.write(
             "[%s seed%d %s] %2d em=%.0f f1=%.2f bul=%d ep=%d uses<=%d skills=%d rep=%d cum=$%.4f\n"
             % (args.method, args.seed, phase, idx + 1, ev["em"], ev["f1"],

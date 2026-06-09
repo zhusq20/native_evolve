@@ -251,6 +251,57 @@ def try_run(task, attempt):
     return True, ""
 
 
+# ------------------------------------------------------------- demo-CV (REFFREE held-out check)
+def apply_demo_holdout(tasks, n):
+    """Harness-side demo cross-validation split (--demo_holdout n): move the LAST n demonstration
+    pairs of each task from the prompt-visible task["demos"] (fit half) to task["cv_demos"] (check
+    half, NEVER shown to the agent), and RE-RENDER task["question"] from the fit demos only — the
+    jsonl ships a pre-rendered question embedding ALL demos, so without the re-render the held-out
+    pair would leak through the prompt, retrieval, and episodic memory. Tasks with fewer than n+1
+    demos are kept whole (>=1 fit demo must remain; cv signal unavailable there). In-place;
+    returns (n_split, n_kept_whole). task["tests"] (gold) is untouched."""
+    split = kept = 0
+    for t in tasks:
+        demos = t.get("demos") or []
+        if len(demos) >= n + 1:
+            t["cv_demos"] = demos[-n:]
+            t["demos"] = demos[:-n]
+            t["question"] = _render_demos(t["demos"])
+            split += 1
+        else:
+            kept += 1
+    return split, kept
+
+
+def cv_check(task, attempt):
+    """REFERENCE-FREE *held-out-demo* execution check (the demo-CV signal): run the candidate
+    solve() on task["cv_demos"] — demonstration pairs the harness WITHHELD from the prompt
+    (apply_demo_holdout). try_run's consistency-on-SHOWN-demos is necessary but 'consistent !=
+    generalizes' (type-2 blind spot); passing a WITHHELD pair is a true generalization estimate —
+    and still reads ZERO gold (cv demos are task-input data any deployment has). Returns
+    (ok, feedback) like try_run: True / False(+why) / None (no code, or no cv_demos)."""
+    code = _extract_code(attempt or "")
+    if not code or "def solve" not in code:
+        return None, ""
+    cv = task.get("cv_demos") or []
+    if not cv:
+        return None, ""
+    ins = [d[0] for d in cv]
+    golds = [d[1] for d in cv]
+    outs, err = _run_solve(code, ins)
+    if outs is None:
+        return False, ("Your solve() failed to run on a WITHHELD demonstration input:\n" + err)
+    for i, (pred, gold) in enumerate(zip(outs, golds), 1):
+        if pred != gold:
+            cells = sum(len(r) for r in gold) or 1
+            return False, ("Your solve() FAILS a demonstration pair that was WITHHELD from the "
+                           "prompt (%d/%d cells correct): the rule you inferred fits the shown "
+                           "examples but does NOT generalize. Re-examine what distinguishes your "
+                           "rule from the true one."
+                           % (int(_cell_acc(pred, gold) * cells), cells))
+    return True, ""
+
+
 # --------------------------------------------------------------------------- reflection
 def evidence(task, response, ev):
     correct = ev["em"] == 1.0

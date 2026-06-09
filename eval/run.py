@@ -27,7 +27,7 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
             reflect_signal="oracle", gate_audit=False,
             memory_mode="native", skill_turns=4, skill_tools="Skill,Read",
             permission_mode="bypassPermissions", gate_sample=0, skill_load="fixed",
-            consolidate_mode="incremental"):
+            consolidate_mode="incremental", demo_holdout=0):
     home = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "home"
     home.mkdir(parents=True, exist_ok=True)
     out = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "tasks.jsonl"
@@ -50,7 +50,7 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
         "--memory_mode", memory_mode, "--skill_turns", str(skill_turns),
         "--skill_tools", skill_tools, "--permission_mode", permission_mode,
         "--gate_sample", str(gate_sample), "--skill_load", skill_load,
-        "--consolidate_mode", consolidate_mode,
+        "--consolidate_mode", consolidate_mode, "--demo_holdout", str(demo_holdout),
         "--home", str(home), "--out", str(out),
     ]
     if agentic:
@@ -132,16 +132,23 @@ def main():
                          "Claude Code paradigm): the MODEL selects relevant items from a presented index "
                          "(+1 claude call/task, ledger-billed). lexical: bag-of-words top-k (pre-2026-06-06 "
                          "behavior; pass explicitly to reproduce older runs).")
-    ap.add_argument("--gate_signal", choices=["reffree", "oracle"], default="oracle",
+    ap.add_argument("--gate_signal", choices=["reffree", "oracle", "demo_cv"], default="oracle",
                     help="skill-promotion GATE signal. oracle (DEFAULT, back-compat): GOLD env.score "
                          "(measurement ceiling, not deploy-available). reffree: deploy-faithful "
-                         "self_verify A/B (no gold). Run both for the precision-law-for-gating A/B.")
-    ap.add_argument("--credit_signal", choices=["reffree", "oracle"], default="oracle",
+                         "self_verify A/B (no gold). demo_cv: held-out-demo execution (no gold; needs "
+                         "--demo_holdout). Run several for the precision-law-for-gating A/B.")
+    ap.add_argument("--credit_signal", choices=["reffree", "oracle", "demo_cv"], default="oracle",
                     help="episodic-success + bullet-CREDIT signal. oracle (DEFAULT): GOLD em. reffree: "
-                         "self_verify ok (deploy-available, no gold).")
-    ap.add_argument("--reflect_signal", choices=["reffree", "oracle"], default="oracle",
+                         "self_verify ok (deploy-available, no gold). demo_cv: held-out-demo execution "
+                         "(no gold, no LLM cost; needs --demo_holdout).")
+    ap.add_argument("--reflect_signal", choices=["reffree", "oracle", "demo_cv"], default="oracle",
                     help="Reflector evidence. oracle (DEFAULT): GOLD collect_evidence (incl. N3). "
-                         "reffree: reference-free verdict + repair trace (no gold; loses N3).")
+                         "reffree: reference-free verdict + repair trace (no gold; loses N3). demo_cv: "
+                         "verdict from the held-out-demo check (says WHY the rule failed to generalize).")
+    ap.add_argument("--demo_holdout", type=int, default=0,
+                    help="hold out the LAST k demos of each task from the prompt -> task['cv_demos'] "
+                         "(env.apply_demo_holdout; arc only for now). Powers the demo_cv signal. Applied "
+                         "to ALL arms (identical solve context). 0 (default) = off.")
     ap.add_argument("--gate_audit", action="store_true",
                     help="precision-law-for-gating audit: log BOTH gate signals (oracle vs reffree) on "
                          "the SAME val A/B answers to home/gate_audit.json (live decision = --gate_signal).")
@@ -187,7 +194,7 @@ def main():
                        args.retrieval, args.gate_signal, args.credit_signal, args.reflect_signal,
                        args.gate_audit, args.memory_mode, args.skill_turns, args.skill_tools,
                        args.permission_mode, args.gate_sample, args.skill_load,
-                       args.consolidate_mode)
+                       args.consolidate_mode, args.demo_holdout)
     if args.workers <= 1:
         for m, s in jobs:
             results[m][s] = _call(m, s)
