@@ -19,7 +19,7 @@ CODE_DIR = pathlib.Path(__file__).resolve().parents[1]
 
 
 def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
-            protocol="prequential", test_n=0, verify_n=18, stratify_key="", induce_every=16,
+            protocol="prequential", test_n=0, stratify_key="", induce_every=16,
             deploy_workers=1, acquire_mode="sequential", learn_workers=4,
             repair_turns=0, repair_methods="ours", verify_mode="self_both",
             agentic=False, agentic_max_turns=20, native_skills="", batch_size=1,
@@ -36,7 +36,7 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
         sys.executable, str(CODE_DIR / "eval" / "prequential.py"),
         "--tasks", tasks, "--env", env_name, "--n", str(n), "--method", method,
         "--seed", str(seed), "--protocol", protocol, "--train_n", str(train_n),
-        "--verify_n", str(verify_n), "--test_n", str(test_n),
+        "--test_n", str(test_n),
         "--stratify_key", stratify_key, "--induce_every", str(induce_every),
         "--deploy_workers", str(deploy_workers),
         "--acquire_mode", acquire_mode, "--learn_workers", str(learn_workers),
@@ -79,10 +79,8 @@ def main():
                          "held-out test headline (SkillOpt-style; measures reuse).")
     ap.add_argument("--train_n", type=int, default=12,
                     help="train/rollout split size (frozen acquisition + external offline-train). SB=80.")
-    ap.add_argument("--verify_n", type=int, default=18,
-                    help="val/selection split size for the skill-edit gate. SkillOpt ~18-40; SB=40.")
     ap.add_argument("--test_n", type=int, default=0,
-                    help="frozen: held-out test size (0=all remaining after train+val). SB=280.")
+                    help="frozen: held-out test size (0=all remaining after train). SB=280.")
     ap.add_argument("--stratify_key", default="",
                     help="stratify splits on this task field (instruction_type for SB, type for hotpotqa).")
     ap.add_argument("--induce_every", type=int, default=16,
@@ -170,7 +168,7 @@ def main():
 
     def _call(m, s):
         return run_one(args.tasks, args.n, m, s, args.outdir, args.train_n, args.env,
-                       args.protocol, args.test_n, args.verify_n, args.stratify_key,
+                       args.protocol, args.test_n, args.stratify_key,
                        args.induce_every, deploy_workers, args.acquire_mode, args.learn_workers,
                        args.repair_turns, args.repair_methods, args.verify_mode,
                        args.agentic, args.agentic_max_turns, args.native_skills, args.batch_size,
@@ -230,8 +228,8 @@ def main():
     headline_n = min((len(results[m][s]) for m in methods for s in seeds), default=0)
     print("\n==================== PHASE-0 SUMMARY ====================")
     if args.protocol == "frozen":
-        print("protocol=frozen  train=%d val=%d test=%d(headline)  methods=%s  seeds=%s"
-              % (args.train_n, args.verify_n, headline_n, methods, seeds))
+        print("protocol=frozen  train=%d test=%d(headline)  methods=%s  seeds=%s"
+              % (args.train_n, headline_n, methods, seeds))
         emlabel = "testEM"
     else:
         print("protocol=prequential  tasks=%d  methods=%s  seeds=%s" % (args.n, methods, seeds))

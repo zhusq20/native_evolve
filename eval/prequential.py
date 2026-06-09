@@ -49,7 +49,7 @@ def prepare_home(home):
 
 
 def stratified_split(all_tasks, sizes, seed, stratify_key=""):
-    """Seeded disjoint split into EXACTLY `sizes` = (n0, n1, n2) consecutive slices.
+    """Seeded disjoint split into EXACTLY len(`sizes`) consecutive slices.
 
     Follows the SkillOpt manifest roles (train -> rollout evidence; val/selection -> accept/reject
     skill edits; test -> frozen held-out headline). If `stratify_key` is set and present on every
@@ -74,8 +74,11 @@ def stratified_split(all_tasks, sizes, seed, stratify_key=""):
             emitted[g] += 1
             remaining -= 1
         pool = order
-    a, b, c = sizes
-    return pool[:a], pool[a:a + b], pool[a + b:a + b + c]
+    out, start = [], 0
+    for n in sizes:
+        out.append(pool[start:start + n])
+        start += n
+    return out
 
 
 def monotone_repair(resp, verify, repair_call, repair_turns, make_hint):
@@ -193,9 +196,6 @@ def main():
                     help="train/rollout-evidence split: # tasks the method LEARNS on. "
                          "frozen acquisition stream + external_optimizer offline-training set. "
                          "SkillOpt SB=80.")
-    ap.add_argument("--verify_n", type=int, default=18,
-                    help="val/selection split: # held-out tasks for the accept/reject skill-edit "
-                         "gate. SkillOpt sizes ~18-40; >6 needed for power over haiku noise (SB=40).")
     ap.add_argument("--test_n", type=int, default=0,
                     help="frozen: # held-out TEST tasks for the headline (0 = all remaining after "
                          "train+val). SkillOpt SB=280.")
@@ -357,21 +357,21 @@ def main():
     # id -> full task (with gold), so the cluster gate can re-solve a gate-half EPISODE's task and
     # judge it (episodes store only the question; gold lives on the task). Covers every split.
     task_by_id = {t["id"]: t for t in all_tasks}
-    # SkillOpt-style disjoint splits: train (rollout evidence the method learns on), val/selection
-    # (verify_tasks: accept/reject the skill-edit gate), test (frozen held-out headline). Optionally
-    # stratified so each split keeps the task-family mix.
+    # Disjoint splits: train (rollout evidence the method learns on) + test (frozen held-out headline).
+    # No separate val/selection split — the pooled consolidation gate (and external_optimizer) verify on
+    # the TRAIN data itself (see consolidate()); the frozen TEST split is the out-of-sample referee.
+    # Optionally stratified so each split keeps the task-family mix.
     if args.protocol == "frozen":
-        test_n = args.test_n if args.test_n > 0 else max(
-            0, len(all_tasks) - args.train_n - args.verify_n)
-        need = args.train_n + args.verify_n + test_n
+        test_n = args.test_n if args.test_n > 0 else max(0, len(all_tasks) - args.train_n)
+        need = args.train_n + test_n
         if len(all_tasks) < need:
-            sys.stderr.write("WARN: %d tasks < train+val+test=%d; later splits truncated\n"
+            sys.stderr.write("WARN: %d tasks < train+test=%d; later splits truncated\n"
                              % (len(all_tasks), need))
-        train_tasks, verify_tasks, tasks = stratified_split(
-            all_tasks, (args.train_n, args.verify_n, test_n), args.seed, args.stratify_key)
+        train_tasks, tasks = stratified_split(
+            all_tasks, (args.train_n, test_n), args.seed, args.stratify_key)
     else:                                                # prequential: eval stream IS the learn stream
-        tasks, train_tasks, verify_tasks = stratified_split(
-            all_tasks, (args.n, args.train_n, args.verify_n), args.seed, args.stratify_key)
+        tasks, train_tasks = stratified_split(
+            all_tasks, (args.n, args.train_n), args.seed, args.stratify_key)
 
     # external_optimizer: pay the offline training cost up front, then freeze one skill.
     # (The actual training runs AFTER solve() is defined — below — so its rollouts go through the SAME

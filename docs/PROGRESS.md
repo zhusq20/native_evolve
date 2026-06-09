@@ -320,6 +320,12 @@ to POOLED same-data (user), + num_turns instrumentation.** Ran the Tier-1 bounda
 - **Status:** code compiles; arc env 38/38 green; NOT yet billed-run with the pooled gate. NEXT: re-run on a
   FOCUSED `group_by_shape` split (the session-16 regime where a transferable procedure exists and memory gave
   +0.50) on the new code, so the pooled gate, the guard, and num_turns all get exercised at once.
+- **Dead-code cleanup (user-spotted): removed `--verify_n` / `verify_tasks`.** Once the gate verifies on the
+  TRAIN data (cluster gate since s20, pooled gate now) there is no separate val/selection split — `verify_tasks`
+  was split out but consumed nowhere, so `--verify_n` only reserved tasks that sat unused (shrinking the pool).
+  Dropped `--verify_n` from `run.py` + `prequential.py`, the frozen split is now `(train, test)` and prequential
+  `(eval, train)`, and `stratified_split` is generalized to `len(sizes)` slices (so `gate_retest.py`'s direct
+  3-tuple call still works). compiles; arc 38/38; split sanity (2-/3-way, disjoint) green.
 
 ### 2026-06-08  (session 19 — make eval台 == real deploy: BOTH memory AND skill retrieval go through Claude Code's NATIVE mechanism (discoverable .claude/skills, agent selects/invokes); mechanism go/no-go PASS for ~$0.01)
 The user asked to align the eval harness with REAL deployment: memory and skill should BOTH be selected
