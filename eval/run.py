@@ -26,7 +26,8 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
             retrieval="agentic", gate_signal="oracle", credit_signal="oracle",
             reflect_signal="oracle", gate_audit=False,
             memory_mode="native", skill_turns=4, skill_tools="Skill,Read",
-            permission_mode="bypassPermissions"):
+            permission_mode="bypassPermissions", gate_sample=0, skill_load="fixed",
+            consolidate_mode="incremental"):
     home = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "home"
     home.mkdir(parents=True, exist_ok=True)
     out = pathlib.Path(outdir) / "runs" / ("%s_seed%d" % (method, seed)) / "tasks.jsonl"
@@ -48,6 +49,8 @@ def run_one(tasks, n, method, seed, outdir, train_n=12, env_name="searchqa",
         "--reflect_signal", reflect_signal,
         "--memory_mode", memory_mode, "--skill_turns", str(skill_turns),
         "--skill_tools", skill_tools, "--permission_mode", permission_mode,
+        "--gate_sample", str(gate_sample), "--skill_load", skill_load,
+        "--consolidate_mode", consolidate_mode,
         "--home", str(home), "--out", str(out),
     ]
     if agentic:
@@ -153,6 +156,15 @@ def main():
                          "self-test envs (ARC) use 'Skill,Read,Write,Edit,Bash'. Same for all arms.")
     ap.add_argument("--permission_mode", default="bypassPermissions",
                     help="native/agentic: claude --permission-mode (default 'bypassPermissions' for headless).")
+    ap.add_argument("--gate_sample", type=int, default=0,
+                    help="pooled gate: cap each candidate skill's A/B set to this many episode-tasks "
+                         "(0=all). Bounds cost when induce proposes MULTIPLE skills.")
+    ap.add_argument("--skill_load", choices=["fixed", "native"], default="fixed",
+                    help="tier-2 skill delivery: fixed (DEFAULT) = harness injects ALL active skills "
+                         "deterministically; native = agent discovers them in the catalog.")
+    ap.add_argument("--consolidate_mode", choices=["incremental", "pooled"], default="incremental",
+                    help="incremental (DEFAULT) = add skills from new memory only, vs existing library; "
+                         "pooled (legacy) = re-induce over the whole bullet pool each time.")
     args = ap.parse_args()
 
     methods = [m.strip() for m in args.methods.split(",") if m.strip()]
@@ -174,7 +186,8 @@ def main():
                        args.agentic, args.agentic_max_turns, args.native_skills, args.batch_size,
                        args.retrieval, args.gate_signal, args.credit_signal, args.reflect_signal,
                        args.gate_audit, args.memory_mode, args.skill_turns, args.skill_tools,
-                       args.permission_mode)
+                       args.permission_mode, args.gate_sample, args.skill_load,
+                       args.consolidate_mode)
     if args.workers <= 1:
         for m, s in jobs:
             results[m][s] = _call(m, s)

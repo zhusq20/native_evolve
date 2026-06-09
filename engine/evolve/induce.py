@@ -93,6 +93,52 @@ def induce(model_items=None, focus_failures=True):
     return out
 
 
+def _skill_oneline(md, max_len=160):
+    """First meaningful line of a skill's markdown (skip the '# title' header) -> a one-line summary
+    for the 'skills you already have' context, so the incremental inducer won't duplicate them."""
+    for line in (md or "").splitlines():
+        s = line.strip()
+        if s and not s.startswith("#"):
+            return s[:max_len]
+    return (md or "").strip()[:max_len]
+
+
+def induce_incremental(new_items, existing_skills=None, focus_failures=False):
+    """INCREMENTAL consolidation (add-only): given the skills the agent ALREADY has (name + md, shown
+    so they are not duplicated) and ONLY the NEW distilled memory since the last consolidation, propose
+    ADDITIONAL orthogonal skills. Input is BOUNDED (new memory + existing-skill one-liners), not the
+    whole pool -> it scales and stops re-deriving / near-duplicating the same skills every period (the
+    session-16 issue). Returns the same [{"name","md","skill"}] shape as induce(); may be empty when the
+    new evidence is already covered. The caller GATES each candidate (marginal value over the existing
+    library) and writes it active/candidate."""
+    digest = memory_digest(new_items if new_items is not None else store.load(),
+                           focus_failures=focus_failures)
+    if not digest.strip():
+        return []
+    existing_block = ""
+    if existing_skills:
+        lines = ["Skills you ALREADY have (do NOT recreate, duplicate, or paraphrase these):"]
+        for s in existing_skills:
+            lines.append("- %s: %s" % (s.get("name", ""), _skill_oneline(s.get("md", ""))))
+        existing_block = "\n".join(lines) + "\n\n"
+    template = (config.PROMPTS_DIR / "skill_inducer_incremental.md").read_text(encoding="utf-8")
+    raw = llm.call_claude(
+        template + "\n\n" + existing_block + "=== NEW MEMORY SINCE LAST CONSOLIDATION ===\n" + digest,
+        allowed_tools="Read")
+    obj = llm.extract_json(raw) or {}
+    skills = obj.get("skills", []) if isinstance(obj, dict) else []
+    existing_names = {s.get("name", "") for s in (existing_skills or [])}
+    out = []
+    for sk in skills:
+        if not isinstance(sk, dict):
+            continue
+        md, name = render_skill_md(sk)
+        if name in existing_names:        # belt-and-suspenders: never re-emit an existing skill name
+            continue
+        out.append({"name": name, "md": md, "skill": sk})
+    return out
+
+
 def _episode_digest(eps, max_items=40, max_q=600, max_sol=800):
     """Render a cluster's TRAIN episodes (raw task -> outcome -> solution) as the inducer's input.
     Shows both FIXED and FAILED traces so the inducer can package the pitfall AND its fix."""

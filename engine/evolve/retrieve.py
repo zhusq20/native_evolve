@@ -211,6 +211,24 @@ def skills_block(prompt, k=3):
     return render_skills_block(_active_skills_with_value(), prompt, k)
 
 
+def all_active_skills_block():
+    """DETERMINISTIC skill loading: render EVERY active promoted skill as one injected text block
+    (no top-k, no relevance ranking — all of them, always, in stable name order). This is the
+    "harness fixedly loads the skill" path the user asked for: it removes native discovery as a
+    variable, so the promotion gate's decision (itself controlled-injection) DIRECTLY predicts what
+    inference sees — eliminating the gate(inject)/inference(native-discover) mismatch. Contrast
+    skills_block() (top-k, native-style relevance selection)."""
+    skills = sorted(_active_skills_with_value(), key=lambda s: s.get("name", ""))
+    if not skills:
+        return ""
+    parts = []
+    for s in skills:
+        desc, body = _skill_summary(s.get("md", ""))
+        parts.append("### %s\n%s\n%s" % (s.get("name", ""), desc, body))
+    return ("Verified skills promoted from experience (ALWAYS consult these; apply those "
+            "relevant to this task):\n\n" + "\n\n".join(parts))
+
+
 def full_playbook_block(cap=60):
     """Inject the ENTIRE active playbook (ACE-style single-tier), not a top-k slice.
 

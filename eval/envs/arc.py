@@ -238,18 +238,39 @@ def try_run(task, attempt):
 def evidence(task, response, ev):
     correct = ev["em"] == 1.0
     fam = task.get("family", "")
-    return {
-        "outcome": "PASS" if correct else "FAIL",
-        "task": "ARC [family=%s skill=%s]: infer the grid-transformation rule and write solve(grid)."
-                % (fam, task.get("skill", "")),
-        "predicted": "held-out tests passed: %s" % ev.get("_tests", "?"),
-        "gold": "exact grid reproduction on held-out inputs",
-        "diagnosis": "" if correct else (
+    reason = ev.get("_reason", "")[:200]
+    if fam:
+        # SYNTHETIC generator: tasks DO share a per-family latent procedure -> record it for the family.
+        task_line = ("ARC [family=%s skill=%s]: infer the grid-transformation rule and write solve(grid)."
+                     % (fam, task.get("skill", "")))
+        diagnosis = "" if correct else (
             "solve() failed on held-out grids (%s). Tasks in the '%s' family ALL share one latent "
             "procedure: extract the connected colored objects (4-connectivity flood fill), SELECT "
             "the objects this family targets, apply the per-object transformation, and redraw on a "
             "blank grid. Record this object-extraction + selection PROCEDURE for the family, not "
-            "this single grid's answer." % (ev.get("_reason", "")[:200], fam)),
+            "this single grid's answer." % (reason, fam))
+    else:
+        # REAL / DIVERSE ARC: NO families -- every puzzle is unique. Do NOT claim a shared procedure
+        # (that false premise collapses the memory into one over-general skill). Ask for TWO things:
+        # (a) this task's SPECIFIC rule, AND (b) any GENERAL, REUSABLE technique that would help a
+        # DIFFERENT puzzle -- those recurring techniques are what consolidate into multiple skills even
+        # though the tasks are NOT the same family.
+        task_line = "ARC puzzle (standalone, no shared family): infer this grid's rule and write solve(grid)."
+        diagnosis = "" if correct else (
+            "solve() failed on held-out grids (%s). This is a UNIQUE puzzle with its OWN rule -- there is "
+            "NO shared family procedure to assume. Record BOTH: (1) the SPECIFIC transformation THIS task "
+            "needs (which objects/cells, what operation, how the output grid is constructed); and (2) any "
+            "GENERAL, TRANSFERABLE technique or sub-procedure it taught you that would help solve OTHER, "
+            "DIFFERENT ARC puzzles -- e.g. extracting connected components, detecting symmetry/reflection, "
+            "finding a repeating tile, mapping colors, cropping to the active region, or always running "
+            "solve() on the shown examples before finalizing. Frame the lesson as a reusable METHOD, not "
+            "this grid's answer." % reason)
+    return {
+        "outcome": "PASS" if correct else "FAIL",
+        "task": task_line,
+        "predicted": "held-out tests passed: %s" % ev.get("_tests", "?"),
+        "gold": "exact grid reproduction on held-out inputs",
+        "diagnosis": diagnosis,
     }
 
 

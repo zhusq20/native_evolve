@@ -16,6 +16,15 @@ For each skill:
 - CONSOLIDATE related failures into ONE coherent skill. Merge ruthlessly. Skills must be
   ORTHOGONAL — each covers a distinct failure; minimal overlap.
 
+IMPORTANT — the lessons may come from DIVERSE, UNRELATED tasks that do NOT share one family or one
+procedure. Do NOT force them into a single global skill. "Merge ruthlessly" means merge lessons that
+teach the SAME technique; it does NOT mean collapse DIFFERENT techniques together. When the lessons
+cover several distinct reusable techniques or sub-procedures (e.g. extracting connected components,
+detecting symmetry, mapping colors, tiling, cropping to the active region, validating output on the
+given examples), emit a SEPARATE, orthogonal skill for EACH such technique. A skill is justified by
+being a transferable METHOD that recurs across DIFFERENT tasks — even when those tasks belong to NO
+common family. A diverse memory should normally yield SEVERAL skills, not one.
+
 The test for inclusion: *on a new task where the agent would otherwise hit this failure,
 would this skill change its actions and turn a fail into a pass?* If you cannot name the
 specific failure it prevents, do NOT emit it.

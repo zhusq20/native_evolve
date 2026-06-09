@@ -204,6 +204,11 @@ def main():
                          "(e.g. instruction_type for SB, type for HotpotQA). '' = plain shuffle.")
     ap.add_argument("--induce_every", type=int, default=16,
                     help="ours_full: run gated skill consolidation every K tasks (0=off)")
+    ap.add_argument("--consolidate_mode", choices=["incremental", "pooled"], default="incremental",
+                    help="how each consolidation forms skills. incremental (DEFAULT): show the inducer "
+                         "the EXISTING skills + ONLY new memory since last time -> ADD orthogonal skills "
+                         "(bounded input, scales, no near-dups); gate base = bullets + active skills. "
+                         "pooled (legacy): re-induce over the WHOLE bullet pool each time, gate vs bullets only.")
     ap.add_argument("--cluster_min", type=int, default=4,
                     help="cluster gate: min episodes sharing a failure signature before that cluster is "
                          "inducible (needs both a train half to write the skill and a gate half to test).")
@@ -212,6 +217,11 @@ def main():
                          "held-out GATE half to ACTIVATE the skill (default 1 = any within-cluster lift), "
                          "combined with a non-dilution guard (broke <= rescued). No power floor: clusters "
                          "are small by design and the test split remains the honest generalization referee.")
+    ap.add_argument("--gate_sample", type=int, default=0,
+                    help="pooled gate: cap each candidate skill's A/B set to this many episode-tasks "
+                         "(0 = all). Bounds cost when induce proposes MULTIPLE skills (cost = "
+                         "#candidates x min(gate_sample, #episodes) x 2 controlled solves). The sample is "
+                         "deterministic (id-sorted prefix) and shared across candidates.")
     ap.add_argument("--gate_min_n", type=int, default=18,
                     help="rolling consolidation gate: min CUMULATIVE A/B val tasks (across "
                          "checkpoints) before a skill set may activate (power floor).")
@@ -303,6 +313,14 @@ def main():
                          "inject: the pre-2026-06-08 behavior — the harness force-injects a top-k memory/skill "
                          "TEXT block into a single-shot prompt (pass explicitly to reproduce old runs; "
                          "--retrieval then applies). ace/external still inject their playbook/frozen-skill text.")
+    ap.add_argument("--skill_load", choices=["fixed", "native"], default="fixed",
+                    help="HOW the consolidated SKILL tier (tier-2) reaches the agent (independent of "
+                         "--memory_mode, which governs tier-1 bullets/episodes). fixed (DEFAULT): the "
+                         "harness DETERMINISTICALLY injects EVERY active skill's text into the solve prompt "
+                         "(retrieve.all_active_skills_block) -> the gate's accept decision directly predicts "
+                         "inference, no native-discovery variance. native: active skills sit in the "
+                         "discoverable .claude/skills catalog and the agent must invoke them (the session-19 "
+                         "behavior; an optional comparison arm to measure discovery loss).")
     ap.add_argument("--skill_turns", type=int, default=4,
                     help="native: claude --max-turns for the Skill-enabled solve (enough to invoke a skill "
                          "then answer). Small (default 4) -> ~1.5-3x single-shot cost, NOT the heavyweight agentic loop.")
@@ -405,6 +423,10 @@ def main():
                                    # PERIODIC one already hit whenever train_n % induce_every == 0 (identical
                                    # episode set -> identical induce+gate, pure waste + near-dup skills).
                                    # Distinct periodic idxs never collide, so this only suppresses the repeat.
+    _consolidated_bullet_ids = set()   # INCREMENTAL watermark: distilled-bullet ids already shown to the
+                                       # inducer -> each consolidation sees only NEW memory (bounded input,
+                                       # no re-derivation). _consolidated_ep_n = episodes already gated on.
+    _consolidated_ep_n = [0]
     def _render_pool_block(bullets):
         """Render the un-consolidated distilled memory as the deterministic injection block both gate
         arms load (the fixed `base`). A LESSONS list — NOT raw task->answer exemplars — so re-solving a
@@ -438,34 +460,27 @@ def main():
             if os.environ.get("NATIVE_EVOLVE_KEEP_SANDBOX") != "1":
                 shutil.rmtree(sandbox, ignore_errors=True)
 
-    def consolidate(idx):
-        """POOLED, SAME-DATA consolidation (user design — replaces the cluster-scoped held-out gate).
-        Show Claude ALL un-consolidated distilled memory at once and let IT decide which lessons to
-        package into skill(s) (`induce.induce`, no per-signature count threshold) — so a small / native
-        stream, where failure signatures are sparse or absent, still yields candidates (this fixes the
-        cluster gate starving for >=4 same-signature episodes). Then gate each candidate on the SAME data
-        it was made from, with NO held-out split (per user): the agent deterministically LOADS the pool
-        memory as the fixed `base`, and the A/B's lone variable is whether the candidate skill is ALSO
-        loaded. Accept iff +skill lifts pass-rate (margin, non-diluting). This is deliberately a same-data
-        FIT check (train==gate) that never starves for samples; the frozen TEST split remains the honest
-        out-of-sample GENERALIZATION referee, so the gate's optimism is bounded by an unseen metric."""
-        if idx in _consolidated_idx:                 # already consolidated at this index (see _consolidated_idx)
-            return
-        _consolidated_idx.add(idx)
-        pool = [b for b in store.load() if b.get("status") == "active"]  # all un-consolidated distilled memory
-        cands = induce.induce(model_items=pool, focus_failures=False)    # Claude decides over the WHOLE pool
-        if not cands:
-            return
-        # gate set = the data BEHIND the memory: every distinct episode's task (NO held-out, per user).
-        seen, gate_tasks = set(), []
-        for e in episodic.load():
+    def _episode_tasks(eps):
+        """Distinct in-pool tasks behind a list of episodes, in order (the gate's A/B set)."""
+        seen, out = set(), []
+        for e in eps:
             tid = e.get("id")
             if tid and tid not in seen and tid in task_by_id:
                 seen.add(tid)
-                gate_tasks.append(task_by_id[tid])
+                out.append(task_by_id[tid])
+        return out
+
+    def _run_gate(cands, gate_tasks, base, mode, idx):
+        """A/B each candidate skill on `gate_tasks`: base vs base+skill (controlled injection). `base`
+        is the deterministic load inference uses (pool bullets [+ active skills, incremental mode]) so
+        the gate measures the candidate's MARGINAL value over what is already loaded. Accept iff
+        (with-skill - without) >= margin AND non-diluting (broke <= rescued); else stay candidate."""
+        # COST BOUND for multi-skill gates: cap each candidate's A/B set to --gate_sample tasks
+        # (deterministic id-sorted prefix, shared across candidates) so K skills cost K x sample x 2.
+        if args.gate_sample and len(gate_tasks) > args.gate_sample:
+            gate_tasks = sorted(gate_tasks, key=lambda t: str(t.get("id", "")))[:args.gate_sample]
         if not gate_tasks:
             return
-        base = _render_pool_block(pool)              # deterministic load of the pool memory (controlled)
         gate_judge = make_judge(args.gate_signal, env, self_verify_mod.self_verify)
         for c in cands:
             skill_text = retrieve.render_skills_block(
@@ -473,8 +488,8 @@ def main():
             full = "\n\n".join(x for x in (base, skill_text) if x)        # base THEN skill (load order)
 
             def _pair(task, _full=full):
-                rb = _gate_solve(task, base)                              # load pool memory, WITHOUT skill
-                rf = _gate_solve(task, _full)                            # load pool memory + READ this skill
+                rb = _gate_solve(task, base)                              # base load, WITHOUT this skill
+                rf = _gate_solve(task, _full)                             # base load + READ this skill
                 return {"base_em": int(bool(gate_judge(task, rb))),
                         "full_em": int(bool(gate_judge(task, rf)))}
             rows = [r for r in llm.pmap(_pair, gate_tasks, args.deploy_workers) if r]
@@ -483,15 +498,61 @@ def main():
             fp = sum(r["full_em"] for r in rows)
             rescued = sum(1 for r in rows if r["base_em"] == 0 and r["full_em"] == 1)
             broke = sum(1 for r in rows if r["base_em"] == 1 and r["full_em"] == 0)
-            # same-data accept: any lift past the margin, non-diluting. NO held-out, NO power floor (per
-            # user); the frozen TEST split is the out-of-sample referee that catches an over-fit skill.
             activate = bool(rows and (fp - bp) >= args.cluster_gate_margin and broke <= rescued)
             induce.write_skill(c, status=("active" if activate else "candidate"))
             sys.stderr.write(
-                "[consolidate pooled @%d] skill=%s gate_n=%d base=%d -> +skill=%d "
+                "[consolidate %s @%d] skill=%s gate_n=%d base=%d -> +skill=%d "
                 "(rescued=%d broke=%d) => %s\n"
-                % (idx, c["name"], len(rows), bp, fp, rescued, broke,
+                % (mode, idx, c["name"], len(rows), bp, fp, rescued, broke,
                    "ACTIVATE" if activate else "candidate (degrade)"))
+
+    def consolidate(idx):
+        """Tier-1 memory -> tier-2 gated skill. Two modes (--consolidate_mode):
+
+        INCREMENTAL (default, the scalable design): show the inducer the skills it ALREADY has + ONLY
+        the NEW distilled memory since the last consolidation, and ask for ADDITIONAL orthogonal skills
+        (`induce.induce_incremental`). Bounded input -> scales past the digest cap and stops re-deriving
+        / near-duplicating skills every period. Each new candidate is gated on the NEW episodes' tasks,
+        with base = pool bullets + ALL currently-active skills (exactly what --skill_load fixed loads at
+        inference), so the gate measures the candidate's MARGINAL value ON TOP of the existing library.
+
+        POOLED (legacy): re-induce over the WHOLE bullet pool every time and gate against pool bullets
+        only. Kept for reproducing pre-incremental runs.
+
+        Either way the frozen TEST split is the honest out-of-sample referee; the gate is a same-data
+        promotion heuristic."""
+        if idx in _consolidated_idx:                 # already consolidated at this index (see _consolidated_idx)
+            return
+        _consolidated_idx.add(idx)
+        pool = [b for b in store.load() if b.get("status") == "active"]
+        if args.consolidate_mode == "incremental":
+            new_bullets = [b for b in pool if b.get("id") not in _consolidated_bullet_ids]
+            existing = retrieve._active_skills_with_value()             # skills already in the library
+            cands = induce.induce_incremental(new_bullets, existing_skills=existing)
+            _consolidated_bullet_ids.update(b.get("id") for b in pool)  # advance the watermark
+            all_eps = episodic.load()
+            new_eps = all_eps[_consolidated_ep_n[0]:]                   # episodes not yet gated on
+            _consolidated_ep_n[0] = len(all_eps)
+            sys.stderr.write("[consolidate incremental @%d] new_bullets=%d existing_skills=%d -> "
+                             "induced %d new candidate(s): %s\n"
+                             % (idx, len(new_bullets), len(existing), len(cands),
+                                ", ".join(c["name"] for c in cands) or "(none)"))
+            if not cands:
+                return
+            gate_tasks = _episode_tasks(new_eps) or _episode_tasks(all_eps)
+            # base = what inference actually loads under --skill_load fixed: pool bullets + active skills.
+            base = "\n\n".join(x for x in (_render_pool_block(pool),
+                                           retrieve.all_active_skills_block()) if x)
+            _run_gate(cands, gate_tasks, base, "incremental", idx)
+        else:                                                          # pooled (legacy)
+            cands = induce.induce(model_items=pool, focus_failures=False)
+            if not cands:
+                return
+            sys.stderr.write("[consolidate pooled @%d] induced %d candidate skill(s): %s\n"
+                             % (idx, len(cands), ", ".join(c["name"] for c in cands)))
+            gate_tasks = _episode_tasks(episodic.load())
+            base = _render_pool_block(pool)
+            _run_gate(cands, gate_tasks, base, "pooled", idx)
 
     LEARN_METHODS = ("episodic", "ours_mem", "ours_full", "ace")
     OURS_METHODS = ("episodic", "ours_mem", "ours_full")
@@ -542,7 +603,10 @@ def main():
         keep their playbook/frozen-skill TEXT in the prompt (via inject) + an EMPTY catalog, so the
         C1 contrast is clean: dump-everything-in-context (ace) vs agent-selects-from-catalog (ours)."""
         if method == "ours_full":
-            return store.load(), episodic.load(), True
+            # tier-2 skills go in the catalog ONLY under native discovery; under --skill_load fixed they
+            # are deterministically injected via inject()/mem_block, so keep them OUT of the catalog
+            # (no double-load). tier-1 bullets+episodes stay discoverable either way.
+            return store.load(), episodic.load(), (args.skill_load != "fixed")
         if method == "ours_mem":
             return store.load(), [], False
         if method == "episodic":
@@ -686,18 +750,25 @@ def main():
         return result, ev, {"repair_calls": ncalls, "signatures": sigs,
                             "cost": cost[0], "trace": trace}
 
+    def _fixed_skill_block():
+        """Tier-2 deterministic load: ALL active skills as text, when --skill_load fixed (else '')."""
+        return retrieve.all_active_skills_block() if args.skill_load == "fixed" else ""
+
     def inject(task):
         """Build the injected memory/skill block for the current method (read-only retrieval)."""
         q = task["question"]
         injected_ids = []
         if args.memory_mode == "native":
-            # ours_*/episodic memory becomes the discoverable CATALOG (built in native_solve), not
-            # in-prompt text -> no injected_ids (credit = what the agent invokes). ace/external still
-            # put their playbook/frozen-skill text in the prompt (the single-tier-dump contrast).
+            # tier-1 memory (bullets/episodes) becomes the discoverable CATALOG (built in native_solve),
+            # not in-prompt text -> no injected_ids (credit = what the agent invokes). But the tier-2
+            # SKILL is loaded per --skill_load: fixed -> inject ALL active skills here (deterministic);
+            # native -> they sit in the catalog. ace/external still inject their single-tier text.
             if args.method == "ace":
                 return retrieve.full_playbook_block(), []
             if args.method == "external_optimizer":
                 return (("## Skill (offline-optimized, frozen)\n" + frozen_skill) if frozen_skill else ""), []
+            if args.method == "ours_full":
+                return _fixed_skill_block(), []                 # "" unless skill_load=fixed
             return "", []
         if args.method == "episodic":
             mem = episodic.exemplar_block(q)                    # raw past-success exemplars (episodic-only)
@@ -706,7 +777,8 @@ def main():
         elif args.method == "ours_full":
             epi = episodic.exemplar_block(q)                    # episodic exemplars
             dis, injected_ids = retrieve_distilled(q)           # distilled memory (lexical|agentic)
-            skl = retrieve.skills_block(q)                      # gated, verified skills (often none)
+            # tier-2 skills: fixed -> ALL active (deterministic); native -> top-k relevance (legacy).
+            skl = _fixed_skill_block() if args.skill_load == "fixed" else retrieve.skills_block(q)
             mem = "\n\n".join(x for x in (epi, dis, skl) if x)
         elif args.method == "ace":
             mem = retrieve.full_playbook_block()                # single-tier: full playbook
