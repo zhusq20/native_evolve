@@ -226,6 +226,64 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-09  (session 21 — REAL ARC-AGI-2 dataset + INCREMENTAL consolidation + DETERMINISTIC skill loading)
+The user asked to test on the REAL ARC-AGI dataset (prior runs used the synthetic family-labeled
+`arc_gen.py`). Switched to **arcprize/ARC-AGI-2** (user picked v2/v3; v3 is an interactive-game benchmark
+that doesn't fit our static input/output-grid program-synthesis env, so v2 — same JSON format as v1 — is
+the right choice). Then, driven by a chain of user design questions, redesigned skill formation.
+
+**Data (NEW `eval/fetch_arc_real.py`):** converts fchollet/ARC-AGI(-1) or arcprize/ARC-AGI-2
+`{train,test}` JSON → the `arc` env's `demos`/`tests` rows (program synthesis + official scoring; no new
+env module — the env is data-agnostic). Committed pools (ARC-AGI-2 training, seed 0): `arc2_train_full.jsonl`
+(no size filter, headline) + `arc2_train_small.jsonl` (≤300 cells, floor probe). Re-fetch: `git clone
+--depth 1 https://github.com/arcprize/ARC-AGI-2 /tmp/ARC-AGI-2` then `python3 eval/fetch_arc_real.py --src
+/tmp/ARC-AGI-2/data/training --out eval/data/arc2_train_full.jsonl --seed 0 --n 90`.
+- **Floor probes (haiku, native, Bash-enabled, single-shot-ish):** ≤120-cell ARC-AGI-1 pool **0.75** (too
+  easy, ceiling); ARC-AGI-2 ≤300 pool **0.50**; ARC-AGI-2 **no filter** (grids ≤900 cells) **0.55** —
+  mid-range, NOT floored (real headroom even at full v2 difficulty; mostly turns=1, genuine haiku ability).
+
+**ROOT-CAUSE FINDING (why family-less data collapsed to ONE over-general skill).** A first family="real"
+run built **27 near-duplicate bullets**, all paraphrasing one idea ("the ARC 'real' family shares an
+object-extraction procedure") → `induce` correctly merged them into 1 skill. Cause: real ARC has NO
+families, but tagging tasks `family="real"` made `arc.py:evidence()` inject a FALSE "tasks in family X ALL
+share one latent procedure" diagnosis (true for the synthetic generator, false for real ARC) → the
+reflector parroted it. **Fix:** converter sets `family=""`; `evidence()` branches — empty family → per-task
+diagnosis asking for (1) THIS task's specific rule AND (2) any TRANSFERABLE technique usable on a DIFFERENT
+puzzle; non-empty → keeps the synthetic family-procedure branch. `skill_inducer.md` now tells the inducer
+diverse/unrelated tasks yield SEVERAL orthogonal skills, not one.
+- **Two user design Qs resolved in code:** (a) "can different-family memory still form skills?" — YES, via
+  transferable-technique skills (the fix above). (b) "can different families merge into ONE shared skill?"
+  — YES: induction is GLOBAL/pooled over all memory (family is just a `scope` tag, not a partition), so a
+  genuine cross-family shared technique can become one skill; the gate validates it.
+
+**INCREMENTAL CONSOLIDATION (`--consolidate_mode incremental`, NEW DEFAULT; `pooled`=legacy).** User Q:
+"is showing Claude ALL bullets at once reasonable, or should it be periodic/incremental?" — agreed: pooled-
+all doesn't scale (digest cap 120 → silent truncation) and re-induces from scratch each period (near-dup
+skills, session-16). New `induce.induce_incremental(new_memory, existing_skills)` + `skill_inducer_incremental.md`:
+shows the inducer the EXISTING skills (don't duplicate) + ONLY new memory since the last consolidation
+(watermark `_consolidated_bullet_ids` / `_consolidated_ep_n`) → ADD orthogonal skills. Bounded input → scales,
+no re-derivation. Gate base = pool bullets + already-active skills → the candidate's MARGINAL value over the library.
+
+**DETERMINISTIC SKILL LOADING (`--skill_load fixed`, NEW DEFAULT; `native`=comparison arm).** User: with a
+curated incremental skill set, the harness should FIXEDLY load skills in train/eval/deploy (not rely on
+native discovery). Assessed as reasonable: it (i) decouples skill VALUE from skill DISCOVERY (resolves the
+recurring "skill tier marginal" ambiguity), and (ii) ALIGNS the gate (already controlled-injection) with
+inference — gate accept now predicts what inference sees. `retrieve.all_active_skills_block()` injects EVERY
+active skill (user chose "all active", not top-k) into the solve prompt; `native_solve` keeps them OUT of the
+catalog under fixed (no double-load); tier-1 bullets stay native. Caveat recorded: doesn't scale past a
+handful of skills (then need a deterministic top-k); deploy fixed-load = hook-inject skill text (pre-19 style),
+a different mode than native CC skills. `--gate_sample N` bounds multi-skill gate cost (K skills → K·N·2 solves).
+
+**Validation (zero→small spend):** existing suites green (arc 38, materialize 17, gate_audit 16,
+deploy_learning 8) + NEW `eval/test_incremental_skill.py` **10/10**. New-path smoke (incremental ×2 rounds +
+fixed-load, family-less ARC-AGI-2 train12/test4, ~$3.6): ran CLEAN — watermark advanced (`@5 new_bullets=0`,
+`@11 new_bullets=2 existing_skills=0 → induced 1: validate-solve-on-examples` = a transferable technique,
+NOT a family procedure), gate kept it candidate (no lift on 4 tiny gate tasks → no false promotion), frozen
+test ran. Committed `52224bc`. The pre-existing `engine/skills/self-verify-and-repair/SKILL.md` edit is left
+uncommitted (unrelated, pending). **NOT YET DONE:** the headline `train=48/test=20` ARC-AGI-2 run (no_memory
+vs ours_full, incremental, fixed-load, `--induce_every 16` = 3 rounds, `--gate_sample 12 --max_concurrency 16`)
+is RUNNING (`results/arc2_t48_incr`); report test EM delta + per-round induced/activated skills + cost on completion.
+
 ### 2026-06-09  (session 20 — REWORK the promotion gate: CLUSTER-SCOPED within-failure-mode A/B, replacing the global val-split gate)
 **Decision (user-driven design):** the promotion gate no longer asks "does this skill generalize to a
 held-out val split". It asks the narrower, higher-power question **"within the failure-mode cluster the
