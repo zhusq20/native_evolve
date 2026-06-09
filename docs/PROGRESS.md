@@ -226,6 +226,47 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-09  (session 23 cont. — OPTION-B BUILD: the demo-CV no-gold signal + T1 smoke PASS — first GOLD-FREE gate ACTIVATE)
+The user picked positioning option 2 (= plan-doc "Option B": online NO-GOLD deploy evolution as the
+headline, precision law as the theory core; REVERSES the session-18 frozen+gold choice for the headline;
+design in `docs/plan_optionB.md`). Audit first: the three signal knobs (--credit/reflect/gate_signal
+oracle|reffree) already existed end-to-end and the online protocol is compatible with native/fixed
+defaults — the ONE missing piece was the designed-but-never-built demo-CV signal (signal_and_gold_policy
+"escape hatch i"). Built it:
+- **`--demo_holdout k`** (prequential+run.py): `env.apply_demo_holdout` moves the LAST k demos of every
+  task to `task["cv_demos"]` and RE-RENDERS `task["question"]` (the jsonl ships a pre-rendered question
+  embedding ALL demos → without re-render the withheld pair leaks via prompt/retrieval/episodic).
+  Applied to ALL arms (identical solve context; signal is the lone variable across signal arms).
+- **`arc.cv_check`**: execute the candidate solve() on the WITHHELD pair → a true GENERALIZATION
+  estimate with ZERO gold and ZERO LLM cost (vs try_run's "consistent with SHOWN demos" = the type-2
+  blind spot). Discriminating unit case: an overfit memorizing solve PASSES try_run, FAILS cv_check.
+- **`--*_signal demo_cv`** on all three knobs (`cv_verdict` + `make_judge` branch + `_learn_signals`
+  generalized to per-kind verdict cache); per-task **`signal_ok`** logged → signal-vs-gold agreement
+  (the precision measurement) computable offline from tasks.jsonl. Tests: NEW `eval/test_demo_cv.py`
+  **24/24**; suites green (signal_routing 25, gate_audit 16, arc 42, incremental 15, materialize 17,
+  deploy_learning 8). Committed 59e5731.
+
+**T1 mechanism smoke (results/_optb_smoke, gitignored; arc_gbs n=12 prequential, holdout=1, ALL signals
+demo_cv, induce_every=8, haiku, $3.84 total): PASS — the full loop ran GOLD-FREE.**
+| arm | preqEM | 2ndHalf | cost | bullets/episodes/skills |
+|---|---|---|---|---|
+| no_memory | 0.333 | 0.167 | $1.39 | 0/0/0 |
+| ours_full | 0.417 | 0.333 | $2.45 | 4/12/**1 ACTIVE** |
+- **signal coverage 12/12** learned tasks carried a demo_cv verdict (no gold fallback — arc_gbs has 4
+  demos/task), credit+reflect+episodes all ran off it.
+- **⭐ FIRST GOLD-FREE GATE ACTIVATE:** `[consolidate incremental @7] skill=coordinate-invariant-rule-
+  validation gate_n=6 base=4 -> +skill=6 (rescued=2 broke=0) => ACTIVATE` — the judge was demo_cv, no
+  gold anywhere. (The recurring "gate never activates" finding was under oracle; single round, n=6 →
+  mechanism proof, NOT yet evidence the activation is correct.)
+- **Signal precision (first real measurement):** agreement with gold 9/12; **FN=0** (never rejected a
+  truly-correct program), FP=3 (passed the 1 withheld demo, failed the held-out TEST grid — a 1-sample
+  probe's honest noise). The T2 read = per-arm agreement demo_cv vs naive reffree (prior audit: reffree
+  base_fail_agree≈0 on ARC).
+- EM +0.083 (ours_full over no_memory) at n=12 → mechanism smoke, not a result.
+**NEXT (T2, ~$15–25, gated on user):** the 5-arm law pilot on arc_gbs n=24 (oracle ceiling / naive
+reffree / demo_cv / no_memory @holdout=1 / no_memory @holdout=0) per `docs/plan_optionB.md`; then T3
+(≥3 seeds + IFBench type-1 positive + faithful external comparison).
+
 ### 2026-06-09  (session 23 — POSITIONING REVIEW: full re-read of papers/ 1–6 → diagnose the unclear thesis + the acceptance-oriented differentiation; zero spend, analysis only)
 The user flagged the thesis as unclear and asked how to differentiate for acceptance. Re-read all 6
 papers/ PDFs in depth (two parallel survey agents; full report delivered in-chat; strategy recorded in
