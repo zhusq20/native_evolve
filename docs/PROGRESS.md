@@ -226,6 +226,40 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-09  (session 23 — POSITIONING REVIEW: full re-read of papers/ 1–6 → diagnose the unclear thesis + the acceptance-oriented differentiation; zero spend, analysis only)
+The user flagged the thesis as unclear and asked how to differentiate for acceptance. Re-read all 6
+papers/ PDFs in depth (two parallel survey agents; full report delivered in-chat; strategy recorded in
+`memory/paper-positioning-strategy.md`). Key conclusions:
+- **Diagnosis:** the thesis drifted across 3 pivots (C1/C2 → precision-law → session-18 boundary-C1),
+  and the session-18 frozen+gold pivot moved the project INTO the crowded offline-optimizer lane
+  (SkillOpt 52/52 cells, GPT-5.5; MemOp; CoEvoSkills) while abandoning the one lane no paper occupies.
+  Meanwhile the data keep saying the same thing the current headline doesn't claim: memory carries the
+  wins (+0.40/+0.50), the skill tier is marginal everywhere (real ARC-AGI-2 EM flat 0.40==0.40), the
+  gate's value is refusal/graceful degradation.
+- **Field map (verified against the PDFs):** NO paper has two-tier itemized-memory→gated-skill; NO paper
+  evolves online inside the deploy loop without labels (MemOp needs GPU finetuning + gold metrics;
+  SkillOpt needs a gold held-out gate, deploys frozen; CoEvoSkills needs an oracle bit, evolves per-task;
+  MUSE's unit-test gate is vacuous in practice — 9% of packages ship tests, same-task re-eval); paper5 is
+  a DIAGNOSIS (consolidation is the failure point; calls for gated consolidation + episodic-first —
+  exactly our architecture, unbuilt by them); paper6 is the attribution critique (updating FLAT, benefit
+  non-monotonic, activation failure SLR 0.25 → directly motivates our `--skill_load fixed`).
+- **Recommended thesis (the constructive sequel to paper5 + mechanism version of paper6):** "abstraction
+  must EARN its keep through an empirical utility gate" — (1) the two-tier deterministic-curation +
+  empirically-gated architecture the field lacks; (2) the boundary result as the headline FINDING
+  (gains live in the memory tier; haiku-authored skills rarely clear the gate; the gate correctly
+  refuses = the safety property MUSE lacks, 80→20 regression); (3) precision law as the second
+  contribution (when can a label-free signal be trusted to drive the gate — reconnects the demoted
+  C2/verification line as a chapter, not infra).
+- **Threats a reviewer WILL raise (now P0/P1):** author-capability confound (paper3: Haiku +44pp from
+  Opus-authored skills; paper6: Haiku largest benefit +15.1 → "skill tier marginal" may be "haiku-authored
+  skills don't help haiku") → need a strong-author arm (`--reflect/induce_model sonnet`); ≥3 seeds + CI
+  (field norm is weak — 5-run±std at best — so this EXCEEDS it); episodic-only arm in every headline
+  table (paper5 mandates it; we already have the mechanism); faithful SkillOpt baseline (external_opt.py
+  is 62-line rounds=1 strawman); compute-matched no_memory+best-of-k. Consider a SkillsBench env
+  (papers 3/4/6 all use it; deterministic verifiers = type-1 → comparability + gate headline in one).
+- NEXT: user decision on the framing; then the P0 experiment plan (seeds+CI, strong-author arm,
+  episodic arm, faithful external) before any new mechanism work.
+
 ### 2026-06-09  (session 22 — design-review fixes: real-ARC prompt prior, inference-faithful gate arms, untruncated fixed skill load)
 A code-design review ("what suppresses EM / what wastes spend") flagged 7 effect-level + 4 cost-level
 issues; the user picked the top three to fix now. All zero-spend validated (suites green: arc 42,
