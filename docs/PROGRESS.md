@@ -327,6 +327,38 @@ to POOLED same-data (user), + num_turns instrumentation.** Ran the Tier-1 bounda
   `(eval, train)`, and `stratified_split` is generalized to `len(sizes)` slices (so `gate_retest.py`'s direct
   3-tuple call still works). compiles; arc 38/38; split sanity (2-/3-way, disjoint) green.
 
+**Session 20 cont. — POOLED-gate e2e run on group_by_shape (arc_gbs_pooled_t1): the gate FIRES, +0.40 memory
+win, skill tier still marginal.** Re-ran on the FOCUSED `group_by_shape` split (`arc_gbs.jsonl`, the s16
+regime; `--train_n 16 --test_n 20 --stratify_key skill --induce_every 16 --memory_mode native --skill_turns 8
+--batch_size 8`, 1 seed, haiku, **$11.0 total**) on the new pooled-gate + num_turns code.
+
+| arm | test EM (n=20) | F1 | num_turns | cost |
+|---|---|---|---|---|
+| no_memory | **0.100** (2/20) | 0.951 | 1.0 (all single-shot) | $2.60 |
+| ours_full | **0.500** (10/20) | 0.975 | 1.6 (1–3) | $8.45 |
+
+- **The pooled gate WORKS (the cluster gate couldn't):** `[consolidate pooled @15] skill=arc-family-procedure-
+  extraction gate_n=16 base=5 -> +skill=5 (rescued=2 broke=2) => candidate (degrade)`. `induce.induce` proposed
+  a skill from the bullets; the A/B ran on ALL 16 source tasks (your no-held-out design); +skill rescued 2 but
+  broke 2 → net 0 < margin → correctly STAGED as candidate, not activated. **Guard validated:** a single
+  `consolidate @15` line (the redundant final consolidate suppressed).
+- **+0.40 EM memory win** (ours_full 0.50 vs no_memory 0.10), replicating the s16 group_by_shape +0.50 on a
+  less-noisy n=20. no_memory cratered from 0.667 (mixed families, arc_boundary_t1) to 0.10 here — group_by_shape
+  is the hard regime that genuinely NEEDS the object-extraction+grouping procedure haiku lacks, so memory has
+  real headroom. 1 seed → strong SIGNAL, not significance.
+- **The +0.40 is MEMORY, not the skill tier.** The skill stayed a candidate (never activated) → ours_full's test
+  run had NO active skill → it is effectively the skill-OFF arm. So this run's boundary answer: distilled memory
+  (12 bullets + episodic, natively discovered) carries +0.40; the skill tier adds 0 (it couldn't beat the raw
+  memory even on its own data). The project's recurring story, now reproduced under the pooled same-data gate.
+- **num_turns instrumentation confirmed + quantifies the turn gap:** no_memory 1.0 (empty catalog → single-shot),
+  ours_full 1.6 (1–3, consults memory). The cap (`--skill_turns 8`) is identical across arms; the ~0.6-turn gap
+  is ours_full self-pacing to read memory (cost ledgered). Small relative to the +0.40 EM, so memory CONTENT —
+  not extra iteration — is the plausible driver; the instrumentation now lets us control it if needed.
+- Results-of-record: `results/arc_gbs_pooled_t1/{summary.json,curve.csv,run.log,runs/*/tasks.jsonl}`.
+- **NEXT:** ≥3 seeds on this exact config → significance for the +0.40 memory claim (`eval/stats.py`); separately,
+  why the induced skill breaks as many as it rescues (a better procedure draft, or a margin/accept tweak, vs the
+  honest read "the bullets already encode the procedure → consolidation adds nothing").
+
 ### 2026-06-08  (session 19 — make eval台 == real deploy: BOTH memory AND skill retrieval go through Claude Code's NATIVE mechanism (discoverable .claude/skills, agent selects/invokes); mechanism go/no-go PASS for ~$0.01)
 The user asked to align the eval harness with REAL deployment: memory and skill should BOTH be selected
 via Claude Code's native skill mechanism (description-gated catalog, agent invokes, body lazy-loaded),
