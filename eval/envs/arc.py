@@ -80,12 +80,29 @@ def _render_demos(demos):
 
 
 def build_prompt(task, mem):
+    if task.get("family"):
+        # SYNTHETIC generator: the select-objects-onto-a-blank-grid story IS how arc_gen builds
+        # every task, so stating it is a true (and useful) prior.
+        rule_line = (
+            "Every example below is produced from the INPUT grid by ONE fixed hidden rule: it selects "
+            "some of the connected colored objects and applies a fixed transformation to each, drawing "
+            "the result on a blank grid (unselected objects disappear).\n\n"
+        )
+    else:
+        # REAL / DIVERSE ARC (family=""): no generative schema may be assumed. The synthetic story is
+        # FALSE for most real puzzles (symmetry completion, scaling, color mapping, ...) — asserting it
+        # would mislead EVERY arm, including no_memory (same false-premise hazard evidence() guards).
+        rule_line = (
+            "Every example below is produced from the INPUT grid by ONE fixed hidden rule that "
+            "transforms the input grid into the output grid. The rule can be anything consistent "
+            "across the examples (e.g. moving/recoloring/duplicating objects, completing a symmetry "
+            "or pattern, scaling, cropping, overlaying); the output grid's size may differ from the "
+            "input's.\n\n"
+        )
     body = (
         "You are solving an ARC-style abstraction puzzle by PROGRAM SYNTHESIS.\n"
         "A grid is a list of rows of integers 0-9 (0 = black background; 1-9 are colored cells).\n"
-        "Every example below is produced from the INPUT grid by ONE fixed hidden rule: it selects "
-        "some of the connected colored objects and applies a fixed transformation to each, drawing "
-        "the result on a blank grid (unselected objects disappear).\n\n"
+        + rule_line +
         "Infer the rule from ALL the examples, then write a Python function with the EXACT signature "
         "`def solve(grid):` that takes a list[list[int]] and returns the transformed list[list[int]]. "
         "Your function must reproduce every example. Use only the Python standard library. Put the "

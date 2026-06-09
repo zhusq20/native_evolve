@@ -140,7 +140,9 @@ def select_and_block_agentic(prompt, k=None):
 
 # --- skill tier: promoted, verified skills fed back into the target (two-tier) ---
 def _skill_summary(md, max_body=560):
-    """Compact a SKILL.md into (description, truncated body) for injection."""
+    """Compact a SKILL.md into (description, body) for injection. max_body=None -> NO truncation
+    (the fixed-load path: a few skills by design, and cutting the body amputates the steps/code
+    the skill exists to carry)."""
     desc, body = "", md
     m = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)$", md, re.S)
     if m:
@@ -149,7 +151,7 @@ def _skill_summary(md, max_body=560):
         if dm:
             desc = dm.group(1).strip()
     body = body.strip()
-    if len(body) > max_body:
+    if max_body is not None and len(body) > max_body:
         body = body[:max_body].rstrip() + " …"
     return desc, body
 
@@ -211,19 +213,29 @@ def skills_block(prompt, k=3):
     return render_skills_block(_active_skills_with_value(), prompt, k)
 
 
-def all_active_skills_block():
+def all_active_skills_block(extra_skills=None):
     """DETERMINISTIC skill loading: render EVERY active promoted skill as one injected text block
     (no top-k, no relevance ranking — all of them, always, in stable name order). This is the
     "harness fixedly loads the skill" path the user asked for: it removes native discovery as a
-    variable, so the promotion gate's decision (itself controlled-injection) DIRECTLY predicts what
-    inference sees — eliminating the gate(inject)/inference(native-discover) mismatch. Contrast
-    skills_block() (top-k, native-style relevance selection)."""
-    skills = sorted(_active_skills_with_value(), key=lambda s: s.get("name", ""))
+    variable, so the promotion gate's decision DIRECTLY predicts what inference sees. Contrast
+    skills_block() (top-k, native-style relevance selection).
+
+    extra_skills: optional [(name, md), ...] rendered AS IF active — the gate's "full" arm presents
+    a CANDIDATE exactly where activation would put it (same sort, header, rendering), so the lone
+    A/B variable is the candidate's presence. Bodies are NOT truncated here (fixed load is a
+    few-skills regime; a 560-char cut silently drops the steps) — and because gate and inference
+    both render through this function, they stay matched."""
+    skills = _active_skills_with_value()
+    have = {s.get("name", "") for s in skills}
+    for nm, md in (extra_skills or []):
+        if nm and nm not in have:
+            skills.append({"name": nm, "md": md, "value": 0})
+    skills = sorted(skills, key=lambda s: s.get("name", ""))
     if not skills:
         return ""
     parts = []
     for s in skills:
-        desc, body = _skill_summary(s.get("md", ""))
+        desc, body = _skill_summary(s.get("md", ""), max_body=None)
         parts.append("### %s\n%s\n%s" % (s.get("name", ""), desc, body))
     return ("Verified skills promoted from experience (ALWAYS consult these; apply those "
             "relevant to this task):\n\n" + "\n\n".join(parts))

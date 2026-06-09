@@ -428,10 +428,11 @@ def main():
                                        # no re-derivation). _consolidated_ep_n = episodes already gated on.
     _consolidated_ep_n = [0]
     def _render_pool_block(bullets):
-        """Render the un-consolidated distilled memory as the deterministic injection block both gate
-        arms load (the fixed `base`). A LESSONS list — NOT raw task->answer exemplars — so re-solving a
-        source task with the pool loaded stays non-trivial (a lesson generalizes; it is not the answer),
-        which is what lets the +skill A/B show signal on the same data."""
+        """Render the un-consolidated distilled memory as a deterministic injection block — the gate
+        `base` in LEGACY memory_mode=inject only (under native mode the bullets ride in the catalog
+        and the gate arms go through native_solve; see _gate_arms). A LESSONS list — NOT raw
+        task->answer exemplars — so re-solving a source task with the pool loaded stays non-trivial
+        (a lesson generalizes; it is not the answer)."""
         if not bullets:
             return ""
         lines = ["## Lessons distilled from earlier tasks (apply when relevant)"]
@@ -442,10 +443,12 @@ def main():
         return "\n".join(lines) if len(lines) > 1 else ""
 
     def _gate_solve(task, mem_text):
-        """CONTROLLED gate solve: the agent loads EXACTLY `mem_text` in its prompt (deterministic
-        injection — NO native catalog, NO discovery) and may RUN code (skill_tools) over skill_turns, so
-        a procedure skill can actually execute. The lone A/B variable is whether `mem_text` includes the
-        candidate skill. Returns the response string (gold-scored by the gate_judge)."""
+        """LEGACY-INJECT gate solve (memory_mode=inject reproduction): the agent loads EXACTLY
+        `mem_text` in its prompt (deterministic injection — NO native catalog, NO discovery) and may
+        RUN code (skill_tools) over skill_turns. The lone A/B variable is whether `mem_text` includes
+        the candidate skill. Under the default memory_mode=native the gate uses _native_gate_solve
+        instead (this bare-injection proxy showed the agent ALL pool bullets as text, which native
+        inference never does — biasing the gate toward reject). Returns the response string."""
         sandbox = tempfile.mkdtemp(prefix="gate_")
         try:
             r = llm.call_claude(
@@ -460,6 +463,33 @@ def main():
             if os.environ.get("NATIVE_EVOLVE_KEEP_SANDBOX") != "1":
                 shutil.rmtree(sandbox, ignore_errors=True)
 
+    def _native_gate_solve(task, mem_text, extra):
+        """INFERENCE-FAITHFUL gate solve (memory_mode=native): the SAME native_solve path inference
+        uses — tier-1 bullets/episodes ride in the discoverable catalog, the skill nudge + PostToolUse
+        hook are on — with `mem_text` carrying the deterministically-injected skill text (fixed load)
+        and `extra` carrying catalog candidates (native load). The gate's accept decision then
+        predicts what inference actually sees. Returns the response string."""
+        try:
+            resp, _ev, _meta = native_solve(task, mem_text, extra_skills=extra)
+            return resp
+        except Exception as exc:
+            sys.stderr.write("gate native solve error: %s\n" % exc)
+            return ""
+
+    def _gate_arms(c):
+        """(base_fn, full_fn) for one candidate under memory_mode=native: each is task->resp, built so
+        the LONE A/B variable is the candidate's presence, presented EXACTLY where an ACTIVE skill
+        would live in the current mode — skill_load=fixed: inside the all-active-skills injected block
+        (all_active_skills_block renders the candidate as if activated: same sort/header/rendering);
+        skill_load=native: as a discoverable catalog entry (native_solve extra_skills)."""
+        if args.skill_load == "fixed":
+            base_block = retrieve.all_active_skills_block()
+            full_block = retrieve.all_active_skills_block(extra_skills=[(c["name"], c["md"])])
+            return (lambda t: _native_gate_solve(t, base_block, None),
+                    lambda t: _native_gate_solve(t, full_block, None))
+        return (lambda t: _native_gate_solve(t, "", None),
+                lambda t: _native_gate_solve(t, "", [(c["name"], c["md"])]))
+
     def _episode_tasks(eps):
         """Distinct in-pool tasks behind a list of episodes, in order (the gate's A/B set)."""
         seen, out = set(), []
@@ -470,11 +500,14 @@ def main():
                 out.append(task_by_id[tid])
         return out
 
-    def _run_gate(cands, gate_tasks, base, mode, idx):
-        """A/B each candidate skill on `gate_tasks`: base vs base+skill (controlled injection). `base`
-        is the deterministic load inference uses (pool bullets [+ active skills, incremental mode]) so
-        the gate measures the candidate's MARGINAL value over what is already loaded. Accept iff
-        (with-skill - without) >= margin AND non-diluting (broke <= rescued); else stay candidate."""
+    def _run_gate(cands, gate_tasks, inject_base, mode, idx):
+        """A/B each candidate skill on `gate_tasks`: with vs without the candidate, presented THROUGH
+        THE SAME path inference uses. memory_mode=native (default): both arms run native_solve
+        (catalog + nudge); base = what inference loads today, full = base + the candidate exactly
+        where activation would put it (_gate_arms) — so accept directly predicts inference.
+        memory_mode=inject (legacy reproduction): controlled text injection over `inject_base`
+        (the pool-bullets block; unused under native). Accept iff (with-skill - without) >= margin
+        AND non-diluting (broke <= rescued); else stay candidate."""
         # COST BOUND for multi-skill gates: cap each candidate's A/B set to --gate_sample tasks
         # (deterministic id-sorted prefix, shared across candidates) so K skills cost K x sample x 2.
         if args.gate_sample and len(gate_tasks) > args.gate_sample:
@@ -483,13 +516,18 @@ def main():
             return
         gate_judge = make_judge(args.gate_signal, env, self_verify_mod.self_verify)
         for c in cands:
-            skill_text = retrieve.render_skills_block(
-                [{"name": c["name"], "md": c["md"], "value": 0}], "", k=1)
-            full = "\n\n".join(x for x in (base, skill_text) if x)        # base THEN skill (load order)
+            if args.memory_mode == "native":
+                base_fn, full_fn = _gate_arms(c)
+            else:                                                          # legacy inject reproduction
+                skill_text = retrieve.render_skills_block(
+                    [{"name": c["name"], "md": c["md"], "value": 0}], "", k=1)
+                full = "\n\n".join(x for x in (inject_base, skill_text) if x)  # base THEN skill
+                base_fn = lambda t, _b=inject_base: _gate_solve(t, _b)         # noqa: E731
+                full_fn = lambda t, _f=full: _gate_solve(t, _f)                # noqa: E731
 
-            def _pair(task, _full=full):
-                rb = _gate_solve(task, base)                              # base load, WITHOUT this skill
-                rf = _gate_solve(task, _full)                             # base load + READ this skill
+            def _pair(task, _bf=base_fn, _ff=full_fn):
+                rb = _bf(task)                                            # WITHOUT this candidate
+                rf = _ff(task)                                            # WITH this candidate
                 return {"base_em": int(bool(gate_judge(task, rb))),
                         "full_em": int(bool(gate_judge(task, rf)))}
             rows = [r for r in llm.pmap(_pair, gate_tasks, args.deploy_workers) if r]
@@ -512,12 +550,13 @@ def main():
         INCREMENTAL (default, the scalable design): show the inducer the skills it ALREADY has + ONLY
         the NEW distilled memory since the last consolidation, and ask for ADDITIONAL orthogonal skills
         (`induce.induce_incremental`). Bounded input -> scales past the digest cap and stops re-deriving
-        / near-duplicating skills every period. Each new candidate is gated on the NEW episodes' tasks,
-        with base = pool bullets + ALL currently-active skills (exactly what --skill_load fixed loads at
-        inference), so the gate measures the candidate's MARGINAL value ON TOP of the existing library.
+        / near-duplicating skills every period. Each new candidate is gated on the NEW episodes' tasks
+        against EXACTLY what inference loads (see _run_gate/_gate_arms: native_solve + the active-skill
+        block under native mode; the pool-bullets text base only in legacy inject mode), so the gate
+        measures the candidate's MARGINAL value ON TOP of the existing library as inference sees it.
 
-        POOLED (legacy): re-induce over the WHOLE bullet pool every time and gate against pool bullets
-        only. Kept for reproducing pre-incremental runs.
+        POOLED (legacy): re-induce over the WHOLE bullet pool every time. Kept for reproducing
+        pre-incremental runs (its inject-mode gate base is pool bullets only).
 
         Either way the frozen TEST split is the honest out-of-sample referee; the gate is a same-data
         promotion heuristic."""
@@ -540,7 +579,8 @@ def main():
             if not cands:
                 return
             gate_tasks = _episode_tasks(new_eps) or _episode_tasks(all_eps)
-            # base = what inference actually loads under --skill_load fixed: pool bullets + active skills.
+            # inject_base feeds ONLY the legacy memory_mode=inject gate (pool bullets + active skills
+            # as text); under native mode _run_gate builds inference-faithful arms via _gate_arms.
             base = "\n\n".join(x for x in (_render_pool_block(pool),
                                            retrieve.all_active_skills_block()) if x)
             _run_gate(cands, gate_tasks, base, "incremental", idx)

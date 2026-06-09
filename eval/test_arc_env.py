@@ -155,6 +155,18 @@ check("build_prompt asks for def solve(grid)", "def solve(grid)" in prompt)
 check("build_prompt renders the examples", "Example 1" in prompt and "INPUT:" in prompt)
 prompt_mem = arc.build_prompt(task, "MEMORY-BLOCK")
 check("build_prompt prepends memory", prompt_mem.startswith("MEMORY-BLOCK"))
+# family-conditional rule line: the select-objects-onto-a-blank-grid story is TRUE only for the
+# SYNTHETIC generator; real ARC (family="") must get a schema-neutral description instead.
+check("build_prompt (synthetic family): states the generator's object-selection schema",
+      task.get("family") and "blank grid" in prompt and "unselected objects disappear" in prompt)
+real_task = dict(task, family="")
+real_prompt = arc.build_prompt(real_task, "")
+check("build_prompt (real, family=''): NO synthetic schema asserted",
+      "unselected objects disappear" not in real_prompt and "blank grid" not in real_prompt)
+check("build_prompt (real): neutral one-fixed-rule framing instead",
+      "ONE fixed hidden rule" in real_prompt and "size may differ" in real_prompt)
+check("build_prompt (real): still asks for def solve(grid) + examples",
+      "def solve(grid)" in real_prompt and "Example 1" in real_prompt)
 
 ev_pass = arc.score(task, good)
 diag = arc.evidence(task, good, ev_pass)

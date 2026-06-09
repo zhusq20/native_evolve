@@ -83,5 +83,19 @@ check("incremental prompt contains the NEW memory digest", "tiling" in calls["pr
 # ---- 4. induce_incremental returns [] on empty new memory (watermark => nothing new) ----
 check("empty new memory -> no candidates", induce.induce_incremental([], existing_skills=existing) == [])
 
+# ---- 5. all_active_skills_block: NO truncation (fixed load) + extra_skills as-if-active (gate) ----
+long_body = "Step detail that the skill exists to carry. " * 25      # ~1100 chars > the legacy 560 cut
+_write_skill("omega-skill", long_body, status="active")
+block5 = retrieve.all_active_skills_block()
+check("fixed-load block is NOT truncated (full long body survives)", long_body.strip() in block5)
+block5x = retrieve.all_active_skills_block(extra_skills=[("beta-cand", "Beta candidate body.")])
+check("extra candidate rendered as-if-active (gate full arm)",
+      "beta-cand" in block5x and "Beta candidate body." in block5x)
+check("extra candidate sits in stable name order (alpha < beta < omega)",
+      block5x.index("alpha-skill") < block5x.index("beta-cand") < block5x.index("omega-skill"))
+check("base block (no extra) excludes the candidate", "beta-cand" not in block5)
+check("name-colliding extra is not rendered twice",
+      retrieve.all_active_skills_block(extra_skills=[("alpha-skill", "DUP")]).count("### alpha-skill") == 1)
+
 print("\n%d/%d passed" % (_n[0] - _fail[0], _n[0]))
 sys.exit(1 if _fail[0] else 0)

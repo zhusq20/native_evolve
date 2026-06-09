@@ -226,6 +226,47 @@ SearchQA: `eval/data/searchqa_val.jsonl` (tracked). GSM8K: `python3 eval/fetch.p
 ---
 
 ## Changelog
+### 2026-06-09  (session 22 — design-review fixes: real-ARC prompt prior, inference-faithful gate arms, untruncated fixed skill load)
+A code-design review ("what suppresses EM / what wastes spend") flagged 7 effect-level + 4 cost-level
+issues; the user picked the top three to fix now. All zero-spend validated (suites green: arc 42,
+incremental_skill 15, materialize 17, gate_audit 16, deploy_learning 8, agentic_retrieval 14,
+signal_routing 25 — incl. 9 NEW checks); no billed smoke yet.
+
+**#1 — build_prompt no longer asserts the synthetic generator's schema on REAL ARC (`eval/envs/arc.py`).**
+The prompt told EVERY task "the rule selects connected objects and draws them on a blank grid
+(unselected objects disappear)" — TRUE for arc_gen, FALSE for most ARC-AGI-2 puzzles (symmetry
+completion, scaling, color mapping, ...). Same false-premise class as the family="real" `evidence()`
+bug fixed in session 21, but on the SOLVE side: it biased every arm incl. the no_memory floor (0.55)
+and pushed reflection toward object-extraction framing. Now branches on `task["family"]`: non-empty →
+the (true) synthetic story; "" → a neutral "ONE fixed hidden rule transforms input into output; the
+output size may differ" framing. ⇒ **real-ARC numbers before/after this change are NOT comparable.**
+
+**#2 — the promotion gate now A/Bs THROUGH THE SAME PATH inference uses (`eval/prequential.py`).**
+The old gate base injected ALL pool bullets as TEXT into a bare sandbox (no catalog, no nudge) — but
+native inference never shows bullets in-prompt (they ride the discoverable catalog, which haiku
+rarely invokes). A candidate had to prove marginal value over a base STRONGER than inference's real
+context → systematic reject bias = a mechanical candidate-explanation for the recurring "skill tier
+marginal" finding. New: under `memory_mode=native` both arms run `native_solve` (catalog + nudge +
+PostToolUse hook); base = what inference loads today, full = base + the candidate EXACTLY where
+activation would put it (`skill_load=fixed`: rendered as-if-active inside `all_active_skills_block`,
+same sort/header/rendering; `native`: a discoverable extra catalog entry). `memory_mode=inject`
+keeps the old pool-text base for reproducing old runs (`_gate_solve` is now legacy-only).
+
+**#3 — fixed skill load injects FULL skill text (`engine/evolve/retrieve.py`).** `_skill_summary`'s
+560-char body cut applied to `all_active_skills_block` AND the gate render — amputating the
+steps/code right where "the skill abstracts away the concrete rule" was the diagnosed weakness.
+Fixed load is a few-skills regime by design, so no cap there (`max_body=None`); the legacy top-k
+render keeps 560. `all_active_skills_block` also gained `extra_skills=[(name, md)]` (render a
+candidate as-if-active — the #2 full arm; name-deduped), unit-tested.
+
+**NEXT:** (a) re-baseline arc2_t48 AFTER these fixes (≥3 seeds; pre-fix numbers not comparable by
+design); (b) a small billed smoke (train12/test4, ~$3–4) to confirm the new gate path end-to-end
+first; (c) remaining review items, by value: #9 share the gate base arm across candidates (pure cost
+saving), #4 near-dup threshold (Jaccard 0.8 misses paraphrases → the 27/12 near-dup bullets), #5 ARC
+tokenization + episode catalog descriptions are digit-walls, #6 split retry policy (turn-cap vs
+transient `exit 1`; gate flips on one flake at margin 1), #7 incremental watermark advances even when
+induce fails (memory silently skipped forever), #11 drop the skills-nudge when the catalog is empty.
+
 ### 2026-06-09  (session 21 — REAL ARC-AGI-2 dataset + INCREMENTAL consolidation + DETERMINISTIC skill loading)
 The user asked to test on the REAL ARC-AGI dataset (prior runs used the synthetic family-labeled
 `arc_gen.py`). Switched to **arcprize/ARC-AGI-2** (user picked v2/v3; v3 is an interactive-game benchmark
