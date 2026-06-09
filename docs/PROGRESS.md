@@ -280,9 +280,37 @@ fixed-load, family-less ARC-AGI-2 train12/test4, ~$3.6): ran CLEAN — watermark
 `@11 new_bullets=2 existing_skills=0 → induced 1: validate-solve-on-examples` = a transferable technique,
 NOT a family procedure), gate kept it candidate (no lift on 4 tiny gate tasks → no false promotion), frozen
 test ran. Committed `52224bc`. The pre-existing `engine/skills/self-verify-and-repair/SKILL.md` edit is left
-uncommitted (unrelated, pending). **NOT YET DONE:** the headline `train=48/test=20` ARC-AGI-2 run (no_memory
-vs ours_full, incremental, fixed-load, `--induce_every 16` = 3 rounds, `--gate_sample 12 --max_concurrency 16`)
-is RUNNING (`results/arc2_t48_incr`); report test EM delta + per-round induced/activated skills + cost on completion.
+uncommitted (unrelated, pending).
+
+**HEADLINE RESULT (`results/arc2_t48_incr`, family-less ARC-AGI-2, frozen train48/test20, 1 seed, haiku, ~$16.7):**
+
+| arm | test EM (n=20) | F1 | bullets | active skills | cost |
+|---|---|---|---|---|---|
+| no_memory | **0.400** (8/20) | 0.658 | 0 | 0 | $2.02 |
+| ours_full | **0.400** (8/20) | 0.704 | 15 | 1 | $14.63 |
+
+- **The incremental mechanism works end-to-end on REAL data (what the user asked for).** 3 rounds, watermark
+  advancing as only-new memory is shown: `@15 new_bullets=9 existing_skills=0 -> induced 1 (validate-solve-on-
+  training-before-held-out); gate base=6 ->+skill=6 (resc1/broke1) => candidate`; `@31 new_bullets=4
+  existing_skills=0 -> induced 1 (validate-arc-solve-on-training); gate base=6 ->+skill=7 (resc2/broke1) =>
+  ACTIVATE`; `@47 new_bullets=2 existing_skills=1 -> induced 0 (already covered)`. Both induced skills are
+  TRANSFERABLE TECHNIQUES ("validate your solve on the training examples"), NOT fake family procedures — the
+  family="" + per-task evidence() fix delivered, so skills DO form on non-same-family tasks. One ACTIVATED via
+  the gate; deterministic fixed-load injected it at test.
+- **Scientific read: EM is FLAT (0.40 == 0.40); memory nudged only F1 (+0.046) at 7x the cost.** On diverse,
+  family-less ARC-AGI-2 the two-tier memory/skill does NOT beat no_memory on EM — the active "validate your
+  solve" skill is a generic technique that flipped no held-out puzzle fail->pass. This is the project's
+  recurring **"skill tier marginal"** finding (see [[boundary-result-memory-over-skill]]), now reproduced on a
+  REAL benchmark under the new incremental + fixed-load design — and it is the EXPECTED diverse/singleton side
+  of the C1 boundary (complement to the synthetic family-rich +0.40 of arc_gbs_pooled_t1). **1 seed -> SIGNAL,
+  not significance.**
+- **Known imperfection (next fix):** the incremental dedup context (`existing_skills`) counts only ACTIVE
+  skills, so `@31` (none active yet) re-induced a near-duplicate of `@15`'s candidate. Pass CANDIDATES into the
+  "skills you already have" context too. Also several transient `claude exit 1` retries during acquire/gate
+  (one acquire task gave up after 1 retry) — handled, didn't crash; raise max_retries for big-grid solves.
+- **NEXT:** (a) >=3 seeds on this config for significance; (b) the `--skill_load native` comparison arm to
+  measure discovery loss (value vs discovery, now cleanly separable); (c) candidate-aware incremental dedup;
+  (d) optionally a harder-headroom or family-structured real subset where a skill could actually flip EM.
 
 ### 2026-06-09  (session 20 — REWORK the promotion gate: CLUSTER-SCOPED within-failure-mode A/B, replacing the global val-split gate)
 **Decision (user-driven design):** the promotion gate no longer asks "does this skill generalize to a
